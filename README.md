@@ -1,57 +1,61 @@
-# Briefoak
+# Pilovo
 
-**A local prompt desk for Claude & ChatGPT.**
+**Keep your AI in view.**
+AI activity for Chrome · **0.4.0 Preview**
 
-Prepare a clear brief, keep related work together, and remember what you sent. Briefoak is a Chrome side panel for people who work across their existing Claude and ChatGPT web accounts.
+Keep track of your ChatGPT and Claude tabs in one quiet workspace. See observed work, notice a response ready for attention, and return to the right session. Pilovo is an experimental Chrome preview.
 
-**Product direction (future): See and manage AI activity in your browser.** The [activity manager PRD](docs/activity-manager-prd.md) defines the new target for web conversations, ChatGPT agent, Claude in Chrome and Claude Code/Codex connected to Chrome. Version 0.3.0 does not implement this live activity manager; future observation and controls depend on verified signals and supported integration contracts.
+![Pilovo — Keep your AI in view. Preview.](docs/media/pilovo-github-banner.png)
 
-![Briefoak — A local prompt desk for Claude & ChatGPT.](docs/media/briefoak-github-banner.png)
+[Install](docs/installation.md) · [Français](docs/README.fr.md) · [Privacy](docs/privacy.md) · [Compatibility](docs/compatibility.md) · [Contribute](CONTRIBUTING.md)
 
-[Install](docs/installation.md) · [Français](docs/README.fr.md) · [Privacy](docs/privacy.md) · [Releases](https://github.com/alebgl77/briefoak/releases) · [Contribute](CONTRIBUTING.md)
+## Keep track of the tabs you authorize
 
-![Briefoak with an example brief and its manual follow-up](docs/media/screenshots/Briefoak_desktop_mission_synthetic.png)
+1. **Enable one site.** Grant optional access to ChatGPT or Claude separately. Access to one does not enable the other.
+2. **Work in your usual account.** Send your prompt in the provider's own interface. Pilovo observes recognized status controls; it does not collect your prompts, responses or tab titles.
+3. **Return when needed.** Open the matching tab or acknowledge an attention item as seen. Seen means you noticed it, not that the task succeeded.
 
-*Briefoak browser preview with synthetic local examples. Statuses are declared manually; no provider execution is shown.*
+The panel distinguishes working, response ready, recognized requests for attention, and unknown or expired evidence. Response ready requires witnessed work followed by a recognized ready signal and debounce. A tab merely being open, a disappearing button or an old completion announcement is insufficient.
 
-## From brief to follow-through
+The toolbar badge reflects the last observed, unacknowledged attention. Evidence has a 15-second logical lifetime. Background tabs may be throttled; Chrome may suspend its service worker. The panel checks freshness, but badge cleanup uses a best-effort watchdog and is not a strict real-time notification guarantee. There are no OS notifications.
 
-1. **Prepare.** Choose Claude or ChatGPT, write a title and prompt, and optionally group it in a mission. Saving the prompt is a separate choice, off for each new preparation.
-2. **Use your web account.** Copy the prompt, open the provider, then paste and send it yourself. Opening an app does not submit anything.
-3. **Keep your place.** Mark the preparation sent or completed yourself. Add a local note and return to related work later.
+![Pilovo activity panel with synthetic examples](docs/media/screenshots/Pilovo_activity_desktop_synthetic.png)
 
-The same workspace opens as a full tab. French and English, light/dark/system themes, search, local notes, missions, JSON export, deletion and retention controls are included.
+*Actual interface rendered with synthetic local activity fixtures. These examples are not a real provider session or execution proof.*
+
+## Preview compatibility
+
+Initial adapters target English/French ChatGPT and Claude web interfaces. They are experimental, not universal agent coverage. On 10 October 2026, manual inspection observed ChatGPT's French streaming and completion indicators. Claude's attempted check was blocked by quota; its completion announcer still contained a finished message. Claude streaming was not captured. This is selector evidence, **not an authenticated end-to-end extension test**. Read the [compatibility record](docs/compatibility.md).
+
+Pilovo offers focus and local acknowledgment. It does not stop, pause, resume or launch agents, send prompts, approve provider actions, inspect other extensions or control native applications. ChatGPT agent, Claude in Chrome and Claude Code/Codex supervision remain future work with separate integration requirements.
 
 ## Install in Chrome
 
-Chrome 120 or later is required. Download the **Briefoak Chrome ZIP** from [Releases](https://github.com/alebgl77/briefoak/releases), extract it, open `chrome://extensions`, enable Developer mode, and choose **Load unpacked**. Select the folder containing `manifest.json`; pin Briefoak and open its side panel.
+Chrome 120+ is required. This is a manually installed preview; there is no Chrome Web Store approval. Use a reviewed `Pilovo_Chrome_v0.4.0.zip` if it is available in [Releases](https://github.com/alebgl77/pilovo/releases), or build from source below. Extract it, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, then select the folder containing `manifest.json`.
 
-If no release asset is available yet, [build from source](#build-from-source). This is an unpacked preview; Briefoak is not listed in the Chrome Web Store. Node.js is needed to build, not to use the extension. No API key, companion, CLI or Briefoak account is required. Your providers' account rules, plans and quotas still apply.
+Pilovo's core is free under MIT. No Pilovo account, API key, companion, CLI or Node.js is required to use the extension. Provider account rules, plans and quotas still apply. Node.js is only needed to build. [Detailed installation and French first-run guide](docs/installation.md).
 
-## What Briefoak can see
+## What Pilovo can see
 
 | Permission | Purpose |
 | --- | --- |
-| `storage` | Local preferences and extension storage access. Records live in IndexedDB. |
-| `sidePanel` | Show the Chrome side panel. |
-| `alarms` | Schedule local retention maintenance. |
-| Optional `https://claude.ai/*` and `https://chatgpt.com/*` | Recognize matching open tabs and return to them after you grant access. |
+| `storage` | Local preferences; saved manual preparations live in IndexedDB. |
+| `sidePanel` | Chrome side panel. |
+| `alarms` | Retention maintenance and best-effort activity watchdog. |
+| `scripting` | Register and sample the bundled isolated observer after a site grant. |
+| Optional `https://chatgpt.com/*` or `https://claude.ai/*` | Recognize matching tabs, read supported status indicators and focus a tab; requested individually. |
 
-Site access is optional and requested for both supported sites together. You can open their official home pages without granting it. Tab presence does not establish login, model choice or activity.
+The observer reads a limited set of DOM controls and dedicated status indicators. It does not collect full conversations, prompt or response text, tab titles, screenshots, cookies or credentials. Activity metadata stays local and ephemeral. No backend, model API, remote telemetry or cloud sync is used. Revocation invalidates access; the observer's lease has a logical cutoff of at most 15 seconds, even if Chrome delays execution of cleanup. See [Privacy](docs/privacy.md) and the [technical contract](docs/core-contract.md).
 
-Briefoak does not read conversations, page content, responses, cookies or credentials. It does not send prompts, run agents, call a model API or verify that work was completed. Sent/completed labels are your declarations. There is no backend, remote telemetry or cloud sync. The [technical contract](docs/core-contract.md) describes these boundaries.
+## Manual preparations remain separate
 
-## What “local” means
+You can still prepare/copy a prompt, keep notes and missions, search, export or delete local history. You paste and send yourself. Sent/completed preparation labels remain human declarations and do not become observed activity.
 
-Records stay in your Chrome profile. Briefoak does **not encrypt** that database or downloaded exports. Titles, notes and retained prompts may be sensitive; profile access, device backups and clipboard contents need their own protection.
-
-Prompt retention is off for every new preparation. Without opting in, the prompt stays in the current form so you can copy it before closing; its text is absent from storage and exports. Titles, provider, status, technical identifiers/dates and separately entered notes or mission links are still saved.
-
-History retention defaults to 30 days and runs while the extension is active. JSON export uses schema 2; import and cross-device sync are not implemented. Purge clears history but keeps preferences and minimal historical anti-replay identifiers. Uninstalling removes the extension's remaining local storage; exports, clipboard, backups and provider conversations are separate. See [Privacy](docs/privacy.md).
+Prompt retention is off for every new preparation. Without opting in, copy its text before closing the form. Titles, provider, manual status, identifiers/dates, notes and mission links are still saved. Storage and exports are **not encrypted by Pilovo**. Retention defaults to 30 days while the extension is active. Schema 2 JSON export includes saved records; import and sync are not implemented. Purge keeps preferences and minimal historical anti-replay identifiers. Uninstall removes remaining extension storage; exports, clipboard, backups and provider history are separate.
 
 ## Build from source
 
-Use Node.js **22.12+** (CI uses Node 22), npm, and Git for the publication regression fixture. Run these commands in this repository's root:
+Use Node.js **22.12+**, npm and Git. From the repository root:
 
 ```sh
 npm ci
@@ -60,19 +64,14 @@ npm test
 npm run test:publication
 npm run build
 npm run package:check
-npm run package
 ```
 
-Load `dist/` as the unpacked extension. Packaging creates versioned Chrome/source ZIPs, license notices and checksums under `release/v<version>/`. It has no Python requirement or dependency on files above the repository. Existing releases are never overwritten. See [Release checks](docs/RELEASE.md).
+Load `dist/` in Chrome. `npm run dev` is a UI preview; actual site observation requires the installed extension. After exact-artifact review, `npm run package` creates immutable versioned Chrome/source ZIPs, license notices and checksums under `release/v<version>/`. [Release gates](docs/RELEASE.md) identify checks and manual gaps.
 
-`npm run dev` opens a local UI preview. Chrome discovery/navigation require the installed extension. The preserved `companion/` code and its scripts/tests are historical reference; the default build and Chrome ZIP do not include a native companion. Internal database/native identifiers retain the old name for compatibility.
+The preserved `companion/` code is a historical experiment, unbundled and unnecessary for Pilovo. Database and protocol identifiers such as `agent-control-hub-v1` and `hub.rpc` stay stable. Briefoak 0.3.0 releases and their claims remain historical; the Pilovo activity feature begins with this preview.
 
 ## Status and contributing
 
-Version 0.3.0 is an early, manually installed release. [Validation](docs/RELEASE.md) separates executed checks from remaining manual review. No store approval, production certification, user count or provider affiliation is claimed. Claude and ChatGPT belong to their respective owners.
+No store approval, production certification, coverage percentage, user count or provider affiliation is claimed. Benchmarks and broader integration goals in the [PRD](docs/activity-manager-prd.md) and [roadmap](docs/roadmap.md) are future targets.
 
-The [positioning and launch notes](docs/positioning-and-launch.md) explain the audience hypothesis and proposed learning plan (French).
-
-Useful first contributions: improve a French/English label with its context; reproduce a keyboard issue with a short sequence; document a permission denial/revocation result with the exact Chrome version. [Contribution guide](CONTRIBUTING.md), [support](SUPPORT.md), [security](SECURITY.md), and the [proposed roadmap](docs/roadmap.md) explain where to start.
-
-Briefoak is available under the [MIT license](LICENSE). Third-party components retain their own licenses; release archives include their notices.
+[Contribution guide](CONTRIBUTING.md) · [Support](SUPPORT.md) · [Security](SECURITY.md). Pilovo uses the [MIT license](LICENSE); third-party components retain their own licenses and notices.

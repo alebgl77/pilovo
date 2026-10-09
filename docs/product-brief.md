@@ -1,30 +1,34 @@
-# Briefoak 0.3.0 — current product brief
+# Pilovo 0.4.0 Preview — current product brief
+
+**Keep your AI in view.** AI activity for Chrome.
 
 ## User and job
 
-Audience to test: independent consultants and writers comparing or combining Claude and ChatGPT in their own web accounts. Job: prepare briefs in one place and maintain a personal record of follow-through without giving an extension access to conversation content.
+Audience hypothesis: people working across ChatGPT and Claude web accounts who want to notice supported activity and return to the relevant tab. The hypothesis is unvalidated; no adoption, uniqueness or measured productivity claim is made.
 
-This positioning is a hypothesis. Other extensions already offer local workspaces and cross-provider organization. Briefoak does not claim to be first, unique, more popular or more secure than those tools.
+## Preview scope
 
-## Shipped scope
+- Activity-first side panel and full-page workspace.
+- Separate optional grants for the exact ChatGPT/Claude origins.
+- Local isolated observer of recognized DOM controls/status indicators, without collecting prompts, responses or tab titles.
+- Working; ready after witnessed work and debounce; explicitly recognized attention; unknown/stale evidence.
+- Focus, local seen acknowledgment and a last-observed attention toolbar badge.
+- Ephemeral activity metadata; fresh evidence required after restart.
+- Existing manual preparations, per-record prompt retention, notes, missions, search, schema 2 export, deletion and retention kept separate.
+- French/English, themes, free MIT core, no account/API key/companion.
 
-- Local preparations with explicit per-record prompt retention, off on creation.
-- Separate copy and provider navigation; the user pastes and sends.
-- Human-declared sent/completed states, notes and missions.
-- Optional tab metadata for exact Claude/ChatGPT origins; no page content access.
-- Side panel/full page, French/English, themes, search, JSON export, deletion and retention.
-- Historical receipts retained with provenance; native transport disabled.
+Initial EN/FR adapters are experimental. Manual ChatGPT selector evidence and the Claude quota/old-announcer counterexample are documented in [Compatibility](compatibility.md), not presented as full authenticated extension E2E.
 
-No model API, backend, telemetry, conversation reader, unattended execution, account detection, result verification, import or sync. Provider rules and quotas apply. Storage and exports have no application-level encryption.
+## Boundaries
 
-## Acceptance boundaries
+Evidence/leases expire logically within 15 seconds. Background throttling can yield unknown; MV3 watchdog badge cleanup is best effort. Response ready and seen do not verify task success.
 
-Copy/open/focus do not change status. A refused/revoked permission keeps official navigation available. One preparation's retention choice is not inherited by the next. Stale edits cannot restore erased prompts. Fresh production profiles have no fabricated records. Export schema 2 and IndexedDB version 4 preserve the distinction between web preparations and historical receipts.
+No stop, pause, resume, launch, automatic submission, provider approval, OS notification, native process control, other-extension inspection, backend, model API, telemetry, import or sync. Saved records/exports have no application-level encryption.
 
-The manifest requires only `storage`, `sidePanel`, `alarms`, with optional hosts `https://claude.ai/*` and `https://chatgpt.com/*`. No content scripts or native companion ship in the Chrome archive. [Core contract](core-contract.md) describes persistence and navigation; [Release checks](RELEASE.md) records evidence and remaining manual review.
+The manifest requires exactly `storage`, `sidePanel`, `alarms`, `scripting`, with the two exact optional hosts. A bundled observer is registered dynamically after a grant; no static content script or companion is shipped. [Core contract](core-contract.md) defines trust and data boundaries.
 
-## Brand and distribution
+## Distribution and next gates
 
-Name: Briefoak. Descriptor: **A local prompt desk for Claude & ChatGPT.** English primary documentation, French companion guide. GitHub repository and manually loaded Chrome ZIP are the first distribution surfaces. Store submission and broader launch remain proposed work.
+The first 0.4.0 distribution is an unpacked pilot. A Chrome Web Store installation would be a future onboarding improvement, subject to publisher requirements and review; approval is not guaranteed. Existing Briefoak releases remain historical. The proposed Pilovo repository URL is used by current docs; publication/rename is a separate maintainer action.
 
-The name was selected after a preliminary public search found no exact match in the checked sources. This is not a trademark clearance or guarantee of exclusivity. No domain ownership, affiliation or provider endorsement is claimed.
+[Release checks](RELEASE.md) must be completed against the exact artifact. The [PRD](activity-manager-prd.md) covers later integrations and qualified controls, without claiming they already work.

@@ -14,9 +14,9 @@ describe('standalone extension client capability boundary', () => {
     await expect(client.connectBridge()).rejects.toMatchObject({ code: 'bridge.unavailable' }); await expect(client.attachActiveTab('legacy')).rejects.toMatchObject({ code: 'permission.denied' });
     expect(request).toHaveBeenCalledTimes(1); expect(sendMessage).not.toHaveBeenCalled();
   });
-  it('packages only the declared minimal permissions with no injection or external connection hooks', () => {
+  it('packages only the declared minimal permissions with grant-scoped injection and no external hooks', () => {
     const manifest = JSON.parse(readFileSync(new URL('../../public/manifest.json', import.meta.url), 'utf8'));
-    expect(manifest.permissions).toEqual(['storage', 'sidePanel', 'alarms']); expect(manifest.optional_host_permissions).toEqual(WEB_ORIGINS);
+    expect(manifest.permissions).toEqual(['storage', 'sidePanel', 'alarms', 'scripting']); expect(manifest.optional_host_permissions).toEqual(WEB_ORIGINS);
     for (const field of ['optional_permissions', 'host_permissions', 'content_scripts', 'externally_connectable', 'web_accessible_resources']) expect(manifest[field]).toBeUndefined();
     const worker = readFileSync(new URL('../../src/background/index.ts', import.meta.url), 'utf8');
     expect(worker).not.toMatch(/connectNative|nativeMessaging|chrome\.management|permissions\.request|NativeControls|fetch\(/);
@@ -26,5 +26,12 @@ describe('standalone extension client capability boundary', () => {
     vi.stubGlobal('chrome', { runtime: { id: 'extension', sendMessage } }); const { client } = await import('../../src/platform/client');
     await expect(client.updateWebPreparation!(crypto.randomUUID(), { expectedRevision: 1, prompt: 'PRIVATE', retainPrompt: true })).rejects.toMatchObject({ code: 'preparation.conflict' });
     expect(sendMessage).toHaveBeenCalledOnce(); expect(sendMessage.mock.calls[0][0].request.patch.expectedRevision).toBe(1);
+  });
+  it('requests and removes one provider synchronously without granting the other', async () => {
+    vi.resetModules(); const request = vi.fn().mockResolvedValue(true), remove = vi.fn().mockResolvedValue(true);
+    vi.stubGlobal('chrome', { runtime: { id: 'extension' }, permissions: { request, remove } });
+    const { client } = await import('../../src/platform/client');
+    const pending = client.requestWebDiscoveryPermission!('chatgpt-web'); expect(request).toHaveBeenCalledExactlyOnceWith({ origins: ['https://chatgpt.com/*'] }); await pending;
+    await client.removeWebDiscoveryPermission!('claude-web'); expect(remove).toHaveBeenCalledExactlyOnceWith({ origins: ['https://claude.ai/*'] });
   });
 });

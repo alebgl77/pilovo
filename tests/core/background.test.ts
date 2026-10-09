@@ -11,12 +11,13 @@ const sender = { id: 'test-extension', url: 'chrome-extension://test-extension/s
 async function rpc(request: unknown): Promise<ApiResult<any> & { data?: any }> { return new Promise(resolve => api.runtime.onMessage.listeners[0]({ channel: 'hub.rpc', request }, sender, resolve)); }
 const request = () => ({ id: crypto.randomUUID(), provider: 'claude-web', title: 'Web preparation' });
 beforeEach(async () => {
-  vi.resetModules(); vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.resetModules(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); vi.stubGlobal('indexedDB', new IDBFactory());
   api = {
     runtime: { id: 'test-extension', getURL: (path: string) => `chrome-extension://test-extension/${path}`, sendMessage: vi.fn().mockResolvedValue(undefined), connectNative: vi.fn(), onMessage: signal(), onInstalled: signal() },
     permissions: { contains: vi.fn().mockResolvedValue(true), request: vi.fn(), onRemoved: signal(), onAdded: signal() },
     tabs: { query: vi.fn().mockResolvedValue([{ id: 4, windowId: 1, url: 'https://claude.ai/chat/private', title: 'Private title' }]), get: vi.fn(), create: vi.fn().mockResolvedValue({ id: 5 }), update: vi.fn(), onCreated: signal(), onUpdated: signal(), onRemoved: signal(), onAttached: signal(), onDetached: signal(), onReplaced: signal() },
-    windows: { update: vi.fn() }, alarms: { create: vi.fn().mockResolvedValue(undefined), onAlarm: signal() }, sidePanel: { setPanelBehavior: vi.fn().mockResolvedValue(undefined), open: vi.fn().mockResolvedValue(undefined) }, action: { onClicked: signal() },
+    scripting: { registerContentScripts: vi.fn().mockResolvedValue(undefined), unregisterContentScripts: vi.fn().mockResolvedValue(undefined), executeScript: vi.fn().mockResolvedValue([]) },
+    windows: { update: vi.fn() }, alarms: { create: vi.fn().mockResolvedValue(undefined), onAlarm: signal() }, sidePanel: { setPanelBehavior: vi.fn().mockResolvedValue(undefined), open: vi.fn().mockResolvedValue(undefined) }, action: { onClicked: signal(), setBadgeText: vi.fn().mockResolvedValue(undefined), setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined) },
   };
   vi.stubGlobal('chrome', api);
   const { HubRepository } = await import('../../src/domain/repository'); const seed = new HubRepository(); await seed.snapshot(); await seed.close();
@@ -37,7 +38,7 @@ describe('standalone service worker trust boundary', () => {
     expect(await rpc({ method: 'connectBridge' })).toMatchObject({ ok: false, error: { code: 'bridge.unavailable' } });
     expect(await rpc({ method: 'controlAgent', request: { kind: 'inventory.request', requestId: crypto.randomUUID() } })).toMatchObject({ ok: false, error: { code: 'bridge.unavailable' } });
     expect((await rpc({ method: 'updateSettings', patch: { bridgeEnabled: true } })).data.bridgeEnabled).toBe(false);
-    expect(api.runtime.connectNative).not.toHaveBeenCalled(); expect(api.permissions.request).not.toHaveBeenCalled(); expect(api.permissions.contains).not.toHaveBeenCalled();
+    expect(api.runtime.connectNative).not.toHaveBeenCalled(); expect(api.permissions.request).not.toHaveBeenCalled(); expect(api.permissions.contains.mock.calls.every(([query]: any[]) => query.origins.every((origin: string) => WEB_ORIGINS.includes(origin as never)))).toBe(true);
   });
   it('supports durable web CRUD through the actual worker RPC and never forges an AgentEvent', async () => {
     const input = request(), first = await rpc({ method: 'createWebPreparation', input }); expect(first.ok).toBe(true);
@@ -68,12 +69,12 @@ describe('standalone service worker trust boundary', () => {
   });
   it('invalidates an in-flight query after revoke/regrant through real event listeners', async () => {
     let release!: (value: unknown[]) => void; api.tabs.query.mockImplementation(() => new Promise(resolve => { release = resolve; }));
-    const pending = rpc({ method: 'getWebDiscovery' }); await vi.waitFor(() => expect(api.tabs.query).toHaveBeenCalled());
+    const pending = rpc({ method: 'getWebDiscovery' }); await vi.waitFor(() => expect(release).toBeTypeOf('function'));
     api.permissions.onRemoved.emit({ origins: WEB_ORIGINS }); api.permissions.onAdded.emit({ origins: WEB_ORIGINS }); release([{ id: 4, windowId: 1, url: 'https://claude.ai/private' }]);
     expect((await pending).data.providers.every((provider: any) => provider.tabs.length === 0)).toBe(true);
   });
   it('coalesces tab and permission changes into a data-free notification', async () => {
-    vi.useFakeTimers(); api.runtime.sendMessage.mockClear(); api.tabs.onUpdated.emit(4, {}, { title: 'Do not expose', url: 'https://unrelated.test' }); api.tabs.onCreated.emit({}); api.permissions.onAdded.emit({ origins: WEB_ORIGINS });
+    api.runtime.sendMessage.mockClear(); api.tabs.onUpdated.emit(4, {}, { title: 'Do not expose', url: 'https://unrelated.test' }); api.tabs.onCreated.emit({}); api.permissions.onAdded.emit({ origins: WEB_ORIGINS });
     await vi.advanceTimersByTimeAsync(250); expect(api.runtime.sendMessage).toHaveBeenCalledOnce(); expect(api.runtime.sendMessage).toHaveBeenCalledWith({ channel: 'hub.changed' });
   });
   it('permits fixed provider opening after denial and refuses removed generic tab capability', async () => {

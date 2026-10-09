@@ -37,11 +37,18 @@ export async function walkFiles(root, { source = false } = {}) {
 }
 const sameSet = (actual = [], expected) => Array.isArray(actual) && actual.length === expected.length && [...actual].sort().join('|') === [...expected].sort().join('|');
 export function validateManifest(manifest, metadata, lock) {
-  if (!/^\d+\.\d+\.\d+$/.test(metadata.version) || metadata.name !== 'briefoak') throw new Error('Expected Briefoak numeric release version.');
+  if (!/^\d+\.\d+\.\d+$/.test(metadata.version) || metadata.name !== 'pilovo') throw new Error('Expected Pilovo numeric release version.');
   if (manifest.manifest_version !== 3 || manifest.version !== metadata.version || manifest.background?.service_worker !== 'background.js') throw new Error('Built MV3 manifest/version mismatch.');
   if (lock.version !== metadata.version || lock.packages?.['']?.version !== metadata.version || lock.name !== metadata.name || lock.packages?.['']?.name !== metadata.name) throw new Error('Lock metadata mismatch.');
-  if (!sameSet(manifest.permissions, ['storage', 'sidePanel', 'alarms']) || !sameSet(manifest.optional_host_permissions, ['https://claude.ai/*', 'https://chatgpt.com/*'])) throw new Error('Permission contract mismatch.');
+  if (!sameSet(manifest.permissions, ['storage', 'sidePanel', 'alarms', 'scripting']) || !sameSet(manifest.optional_host_permissions, ['https://claude.ai/*', 'https://chatgpt.com/*'])) throw new Error('Permission contract mismatch.');
   if ((manifest.host_permissions || []).length || (manifest.optional_permissions || []).length || ['content_scripts', 'externally_connectable'].some(key => key in manifest)) throw new Error('Unsupported permission/code channel.');
+  if (manifest.content_security_policy?.extension_pages !== "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'") throw new Error('Extension code must stay local.');
+}
+export function validateChromeFiles(files) {
+  const required = ['manifest.json', 'index.html', 'sidepanel.html', 'background.js', 'observer.js', 'icons/mark.svg', ...[16, 32, 48, 128].map(size => `icons/icon${size}.png`), ...['en', 'fr'].map(locale => `_locales/${locale}/messages.json`)];
+  for (const file of required) if (!files.includes(file)) throw new Error(`Missing Chrome artifact: ${file}`);
+  if (!files.some(file => /^assets\/[\w-]+\.js$/.test(file)) || !files.some(file => /^assets\/[\w-]+\.css$/.test(file))) throw new Error('Missing Chrome UI assets.');
+  if (files.some(file => !required.includes(file) && !/^assets\/[\w-]+\.(?:js|css)$/.test(file))) throw new Error('Unexpected Chrome archive content.');
 }
 export function scanText(relative, text) {
   const findings = [];

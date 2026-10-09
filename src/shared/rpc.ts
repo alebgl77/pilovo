@@ -4,6 +4,9 @@ import { controlRequestSchema } from './launch';
 import { webPreparationInputSchema, webPreparationPatchSchema, webProviderSchema } from './web';
 const key = z.string().min(1).max(350);
 export const rpcSchema = z.discriminatedUnion('method', [
+  z.object({ method: z.literal('getWebActivity') }).strict(),
+  z.object({ method: z.literal('focusWebActivity'), id: z.uuid() }).strict(),
+  z.object({ method: z.literal('acknowledgeWebActivity'), id: z.uuid(), attentionId: z.uuid() }).strict(),
   z.object({ method: z.literal('getWebDiscovery') }).strict(),
   z.object({ method: z.literal('createWebPreparation'), input: webPreparationInputSchema }).strict(),
   z.object({ method: z.literal('updateWebPreparation'), id: z.uuid(), patch: webPreparationPatchSchema }).strict(),

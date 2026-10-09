@@ -1,9 +1,17 @@
-# Briefoak — cible produit : gestion de l’activité IA
+# Pilovo — cible produit : gestion de l’activité IA
 
-Date : 10 octobre 2026. Statut : spécification future, aucune capacité nouvelle livrée par ce document.
+Date : 10 octobre 2026. Statut : cible générale et distinction du pilote **0.4.0 Preview**.
 Ce PRD remplace la préparation manuelle de prompts comme vision produit ; les documents de version restent descriptifs de leur livraison.
-Nom de travail conservé : Briefoak. Signature cible : **See and manage AI activity in your browser.**
-Cette signature exprime l’objectif, pas une promesse de couverture déjà disponible.
+Nom : **Pilovo**. Signature : **Keep your AI in view.** Descripteur : **AI activity for Chrome**.
+Le screening du nom est préliminaire, sans garantie juridique ou exclusivité démontrée.
+
+## Périmètre actuel du pilote
+
+La préversion 0.4.0 ajoute des observateurs web EN/FR expérimentaux pour ChatGPT et Claude : travail reconnu, réponse prête après travail observé puis signal stabilisé, attention explicite reconnue, inconnu/périmé, focus et acquittement vu. Les permissions sont facultatives par fournisseur. Un observateur isolé lit des contrôles/annonces dédiés du DOM, sans collecter conversations, consignes, réponses complètes ni titres d'onglets. Les métadonnées sont locales et temporaires. Le cœur MIT est gratuit, sans compte, clé API ou compagnon.
+
+La preuve et le bail expirent logiquement sous 15 secondes ; le ralentissement des pages peut rendre l'état inconnu. Le badge représente la dernière attention observée, avec nettoyage best effort sous MV3. Aucune notification système ni commande d'arrêt/pause/lancement n'est fournie.
+
+La [matrice de compatibilité](compatibility.md) distingue preuves et limites : inspection manuelle ChatGPT FR, tentative Claude bloquée par quota malgré une annonce de fin persistante, aucun streaming Claude capturé ni E2E authentifié de l'extension revendiqué. Les états normalisés, connecteurs et commandes décrits plus bas sont la **cible future**, pas tous des fonctionnalités du pilote. Une fin observée n'est jamais une réussite vérifiée.
 
 ## Objectif et écart actuel
 
@@ -11,8 +19,7 @@ Permettre de comprendre **ce que les IA font maintenant**, de retrouver leur con
 La cible englobe les conversations web, ChatGPT agent, Claude in Chrome et Claude Code/Codex reliés à Chrome.
 Le produit reste une extension Chrome autonome : aucun nouveau compagnon obligatoire, backend ou clé API exigée.
 La couverture complète dépend néanmoins des signaux et contrats d’interopérabilité accessibles à chaque fournisseur.
-Briefoak 0.3.0 reconnaît des onglets et conserve des préparations avec des statuts déclarés manuellement.
-Il n’observe pas l’exécution ni les demandes d’intervention : cette version ne satisfait donc pas l’objectif d’activité en direct.
+Historiquement, Briefoak 0.3.0 reconnaissait des onglets et conservait des préparations avec des statuts déclarés manuellement, sans observer l'activité. Pilovo 0.4.0 couvre uniquement le pilote web décrit ci-dessus ; il ne satisfait pas la cible universelle.
 Les préparations restent secondaires ; une déclaration humaine ne devient jamais une observation automatique.
 
 ## Écran d’entrée : Activité
@@ -54,7 +61,7 @@ Les budgets, coûts et tokens n’apparaissent que si la source fournit réellem
 
 ## Matrice des intégrations à qualifier
 
-Les lignes suivantes définissent le périmètre futur, sans affirmer l’existence d’un connecteur Briefoak opérationnel.
+Les lignes suivantes définissent le périmètre futur, sans affirmer l’existence d’un connecteur Pilovo opérationnel.
 
 | Source | Observation envisageable | Contrôle et limite |
 | --- | --- | --- |
@@ -62,12 +69,12 @@ Les lignes suivantes définissent le périmètre futur, sans affirmer l’existe
 | Claude web | Même périmètre : indicateurs d’interface, sans lire prompts ni réponses. | Même qualification par capacité ; aucune symétrie présumée avec ChatGPT. |
 | ChatGPT agent | État et demandes exposés dans l’interface ChatGPT accessible localement. | Contrôles exposés seulement ; aucun accès implicite aux onglets ou actions internes du navigateur distant. |
 | Claude in Chrome | Événements d’un contrat d’interopérabilité documenté et accepté, s’il existe. | L’isolation entre extensions empêche de présumer un accès à son état interne ; contrôle soumis au même contrat. |
-| Claude Code relié à Chrome | Pont officiel existant vers Claude in Chrome ; signaux utilisables par Briefoak à établir séparément. | Ce pont ne prouve aucune API publique ni aucun droit de contrôle pour Briefoak. |
+| Claude Code relié à Chrome | Pont officiel existant vers Claude in Chrome ; signaux utilisables par Pilovo à établir séparément. | Ce pont ne prouve aucune API publique ni aucun droit de contrôle pour Pilovo. |
 | Codex relié à Chrome | Métadonnées d’un pont existant seulement si un contrat accessible les expose. | Processus externe non gérable par Chrome seul ; capacité inconnue jusqu’à validation de ce contrat. |
 
 Claude Code documente sa connexion à Claude in Chrome et des onglets locaux visibles regroupés par session : le pont existe bien. [Documentation Claude Code](https://code.claude.com/docs/en/chrome).
 ChatGPT documente un navigateur virtuel et un navigateur cloud distinct du navigateur local. [ChatGPT agent](https://help.openai.com/en/articles/11752874-chatgpt-agent), [Cloud browser](https://help.openai.com/en/articles/20001280-using-cloud-browser-in-chatgpt).
-Déduction pour Briefoak : ni ces onglets groupés ni l’existence de ces ponts ne constituent un contrat de supervision interopérable.
+Déduction pour Pilovo : ni ces onglets groupés ni l’existence de ces ponts ne constituent un contrat de supervision interopérable.
 Sans contrat exploitable, afficher la limite et un accès au contexte disponible ; ne pas inventer d’activité ni imposer un nouveau compagnon.
 
 ## Commandes et intervention humaine
@@ -81,7 +88,7 @@ Ne jamais présenter la fermeture d’un onglet comme un arrêt du processus ou 
 Aucun faux bouton « Tout mettre en pause » : une commande collective doit annoncer ses cibles compatibles et les échecs individuels.
 Toute commande part d’une action explicite de l’utilisateur ; lancer ou réessayer expose la cible et le risque de répéter une action.
 Les approbations d’achat, d’envoi, de publication et autres actions conséquentes restent des décisions explicites dans l’interface du fournisseur.
-Briefoak peut attirer l’attention et ouvrir cette interface ; il ne clique jamais automatiquement sur ses approbations.
+Pilovo peut attirer l’attention et ouvrir cette interface ; il ne clique jamais automatiquement sur ses approbations.
 
 ## Adaptateurs, permissions et sécurité
 
@@ -122,11 +129,21 @@ Cet historique est supprimable et soumis à une durée de rétention visible ; i
 
 Chaque version publie une ligne par couple intégration/capacité : `version | intégration | capacité | planifiée/expérimentale/disponible/non prise en charge | preuve datée | limites`.
 « Disponible » exige les parcours pertinents réussis sur la version livrée ; « expérimental » exige aussi une preuve datée et ses limites.
-La v0.3.0 reste qualifiée comme préparation manuelle et reconnaissance d’onglets ; ce PRD ne change pas son manifeste, ses permissions ni ses fonctionnalités.
+La v0.3.0 reste qualifiée comme préparation manuelle et reconnaissance d’onglets. Ses archives demeurent immuables ; seule la v0.4.0 introduit l'observation expérimentale décrite en tête de ce document.
+
+## Adoption internationale — objectifs futurs
+
+1. Recruter 30 pilotes volontaires dans au moins 3 pays ; aucun de ces volumes n'est présenté comme acquis.
+2. Consolider EN + FR, puis envisager ES/PT selon les retours.
+3. Préparer une démo réelle consentie avec matrice de compatibilité datée, distincte des captures synthétiques.
+4. Ouvrir adaptateurs, fixtures et benchmark public reproductible. Toute cible de fiabilité telle que 99 % reste à définir et mesurer.
+5. Préparer un lancement ciblé autorisé, respectant les règles des communautés ; aucune campagne ou publication n'est autorisée par ce PRD.
+
+Le [plan de lancement](positioning-and-launch.md) détaille ces étapes. L'installation Chrome Web Store est une amélioration future soumise à acceptation ; le pilote reste à charger manuellement.
 
 ## Fondements Chrome et limites des sources
 
 Les content scripts peuvent lire le DOM autorisé et disposent d’un environnement isolé ; cela rend l’observation d’indicateurs envisageable, sans prouver leur disponibilité chez un fournisseur. [Chrome : content scripts](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts).
-Chrome propose une messagerie entre composants et entre extensions, ainsi que des échanges avec un hôte natif enregistré. Un fournisseur doit exposer et accepter un contrat pour permettre une intégration ; aucune API Briefoak n’en découle automatiquement. [Chrome : messaging](https://developer.chrome.com/docs/extensions/develop/concepts/messaging).
+Chrome propose une messagerie entre composants et entre extensions, ainsi que des échanges avec un hôte natif enregistré. Un fournisseur doit exposer et accepter un contrat pour permettre une intégration ; aucune API Pilovo n’en découle automatiquement. [Chrome : messaging](https://developer.chrome.com/docs/extensions/develop/concepts/messaging).
 L’API Tabs décrit des onglets, leur activation et leur suspension ; elle ne décrit pas l’intention d’un agent. Déduire une exécution IA de ces seuls événements serait une hypothèse non étayée. [Chrome : Tabs](https://developer.chrome.com/docs/extensions/reference/api/tabs).
 Ces sources établissent des mécanismes généraux. La compatibilité, les signaux et les commandes de chaque adaptateur restent à vérifier avant toute annonce de livraison.

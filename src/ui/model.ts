@@ -1,5 +1,5 @@
 import type { Mission, TaskRun } from '../shared/types';
-export type Route = 'preparations' | 'attention' | 'missions' | 'history' | 'connections' | 'settings';
+export type Route = 'activity' | 'preparations' | 'attention' | 'missions' | 'history' | 'connections' | 'settings';
 export type AttentionFilter = 'all' | 'questions' | 'results' | 'failures' | 'signals';
 export interface Filters { query: string; source: string; execution: string; mission: string; since: string; attention: AttentionFilter }
 export const emptyFilters: Filters = { query: '', source: '', execution: '', mission: '', since: '', attention: 'all' };

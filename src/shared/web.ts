@@ -28,8 +28,8 @@ export type WebPreparationInput = z.infer<typeof webPreparationInputSchema>;
 export type WebPreparationPatch = z.infer<typeof webPreparationPatchSchema>;
 export interface WebDiscovery {
   permission: 'granted' | 'not-granted' | 'unavailable';
-  providers: { id: WebProvider; tabs: { tabId: number; windowId: number }[] }[];
+  providers: { id: WebProvider; permission: WebDiscovery['permission']; tabs: { tabId: number; windowId: number }[] }[];
 }
 export function emptyWebDiscovery(permission: WebDiscovery['permission']): WebDiscovery {
-  return { permission, providers: WEB_PROVIDERS.map(({ id }) => ({ id, tabs: [] })) };
+  return { permission, providers: WEB_PROVIDERS.map(({ id }) => ({ id, permission, tabs: [] })) };
 }

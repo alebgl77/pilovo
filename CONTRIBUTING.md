@@ -1,6 +1,6 @@
-# Contributing to Briefoak
+# Contributing to Pilovo
 
-Start with a focused [issue](https://github.com/alebgl77/briefoak/issues) describing the problem and expected result. Search existing reports first. For larger changes, discuss the scope before implementing.
+Start with a focused [issue](https://github.com/alebgl77/pilovo/issues) describing the problem and expected result. Search existing reports first. For larger changes, discuss the scope before implementing.
 
 Good first contributions include a contextual French/English label correction, a reproducible keyboard navigation problem, or a permission denial/revocation observation with the Chrome version. These are suggestions, not claims that labeled issues already exist.
 
@@ -12,4 +12,4 @@ Preserve the distinction between tab presence, a human statement and provider ex
 
 The `companion/` directory and native tests/scripts are historical reference, not the default product. See [Release checks](docs/RELEASE.md) for what is shipped. Be respectful, describe behaviors rather than attacking people, and keep discussion relevant. Maintenance and reviews are best-effort, with no guaranteed response time.
 
-Briefoak uses the [MIT license](LICENSE). Submit only changes you have the right to contribute under that license. Third-party components retain their respective licenses.
+Pilovo uses the [MIT license](LICENSE). Submit only changes you have the right to contribute under that license. Third-party components retain their respective licenses.

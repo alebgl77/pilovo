@@ -17,18 +17,21 @@ const passed = name => { checks.push(name); process.stdout.write(`PASS ${name}\n
 const nav = name => page.getByRole('navigation').getByRole('button', { name, exact: true });
 const snapshot = () => page.evaluate(async () => (await import('/src/platform/client.ts')).client.getSnapshot());
 const audit = async name => {
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {}))));
   const report = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
   accessibility.push({ name, violations: report.violations.map(({ id, impact, nodes }) => ({ id, impact, nodes: nodes.map(n => ({ target: n.target, summary: n.failureSummary })) })) });
   if (report.violations.length) throw new Error(`${name}: ${JSON.stringify(accessibility.at(-1))}`);
 };
 try {
   await page.goto(base);
-  await expect(page.getByRole('heading', { name: 'Votre attention', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Activité', exact: true })).toBeVisible();
   expect((await snapshot()).tasks).toHaveLength(0);
   await page.screenshot({ path: path.join(output, 'desktop-empty.png') });
   await audit('desktop-empty-light');
   passed('honest empty preview, desktop light accessibility');
 
+  await page.getByRole('navigation').getByRole('button', { name: /^Missions/ }).click();
   const create = page.getByRole('button', { name: 'Nouvelle mission', exact: true }).first();
   await create.click();
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -69,8 +72,8 @@ try {
     await repo.close();
   });
   await page.reload();
+  await nav('Historique').click();
   await expect(page.locator('.task-row')).toHaveCount(4);
-  await expect(page.locator('.task-row').first()).toContainText('Question de périmètre');
   await page.locator('.task-row').filter({ hasText: 'Reçu à relire' }).click();
   await expect(page.locator('.task-title')).toHaveText('Reçu à relire (scénario synthétique)');
   await expect(page.locator('.task-title')).toBeFocused();
@@ -82,8 +85,8 @@ try {
   await expect(page.getByText('Revue enregistrée.', { exact: true })).toBeVisible();
   const accepted = (await snapshot()).tasks.find(task => task.taskId === 'receipt');
   expect(accepted.review.status).toBe('accepted'); expect(accepted.verification.status).toBe('unverified');
-  await expect(page.locator('.task-row')).toHaveCount(3);
-  passed('attention derived from events, literal task text, prompt minimization, human acceptance does not verify');
+  await expect(page.locator('.task-row')).toHaveCount(4);
+  passed('legacy history preserves event states, literal task text, prompt minimization; human acceptance does not verify');
 
   const missionId = (await snapshot()).missions[0].id;
   await page.getByLabel('Associer à une mission').selectOption(missionId);
@@ -142,12 +145,11 @@ try {
   await page.screenshot({ path: path.join(output, 'desktop-settings-dark.png') });
   passed('English, dark theme, retention and real JSON export without file bytes or unconsented prompts');
 
-  await nav('Connections').click();
-  await expect(page.getByRole('button', { name: 'Connect companion', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: 'Install and configure', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Connect your first task', exact: true })).toBeVisible();
-  await audit('desktop-connections-dark');
-  passed('preview capability gating and honest companion setup');
+  await nav('Activity').click();
+  await expect(page.getByRole('heading', { name: 'Observation requires the extension', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect Claude', exact: true })).toHaveCount(0);
+  await audit('desktop-preview-activity-dark');
+  passed('preview activity is honestly unavailable without the extension');
 
   await page.setViewportSize({ width: 360, height: 800 });
   await nav('History').click();
@@ -166,7 +168,7 @@ try {
   passed('360px drilldown/back, no horizontal overflow, keyboard focus restoration and search shortcut');
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  expect(await page.locator('.button').first().evaluate(el => getComputedStyle(el).transitionDuration)).toBe('0s');
+  expect(await page.locator('.nav-item').first().evaluate(el => getComputedStyle(el).transitionDuration)).toBe('0s');
   await page.getByRole('navigation').getByRole('button', { name: /^Missions/ }).click();
   await page.locator('.mission-tabs button').nth(1).click();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();

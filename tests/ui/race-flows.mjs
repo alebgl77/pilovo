@@ -7,7 +7,7 @@ try {
   await page.goto(`${process.env.HUB_TEST_URL || 'http://127.0.0.1:5173'}/tests/ui/race-harness.html`);
   await page.waitForFunction(() => window.__hubHarness?.pending().snapshots === 1);
   await page.evaluate(() => window.__hubHarness.resolveSnapshot(0, 'Initial mission'));
-  await expect(page.getByRole('heading', { name: 'Votre attention', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Activité', exact: true })).toBeVisible();
   await page.getByRole('navigation').getByRole('button', { name: 'Missions 1', exact: true }).click();
   await page.evaluate(() => { window.__hubHarness.signal(); window.__hubHarness.signal(); });
   expect((await state()).snapshots).toBe(3);
@@ -18,6 +18,7 @@ try {
   await expect(page.locator('.mission-tabs')).not.toContainText('Stale mission');
   process.stdout.write('PASS out-of-order snapshots cannot overwrite newer state\n');
 
+  await page.getByRole('navigation').getByRole('button', { name: 'Historique', exact: true }).click();
   await page.locator('.task-row').filter({ hasText: 'Synthetic task A' }).click();
   await page.locator('.task-row').filter({ hasText: 'Synthetic task B' }).click();
   expect((await state()).timelines).toHaveLength(2);
@@ -27,6 +28,7 @@ try {
   await expect(page.locator('.timeline')).not.toContainText('STALE A EVENT');
   process.stdout.write('PASS late timeline from a previously selected task is ignored\n');
 
+  await page.getByRole('navigation').getByRole('button', { name: 'Missions 1', exact: true }).click();
   await page.getByRole('button', { name: 'Nouvelle mission', exact: true }).click();
   await page.getByLabel('Nom de la mission', { exact: true }).fill('New mission');
   await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();

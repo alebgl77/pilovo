@@ -1,50 +1,41 @@
-# Briefoak
+# Pilovo
 
-A local prompt desk for Claude & ChatGPT.
+**Keep your AI in view.** Descriptor: **AI activity for Chrome**. Distribution label: **Preview**.
 
-Briefoak helps people prepare prompts, open the chosen service, and record their own follow-through. The brand should feel clear, grounded, and useful. Product copy must preserve that human role and must not imply conversation access or automatic execution.
+Pilovo's identity belongs to the activity pilot, not the historical Briefoak releases. Product copy describes bounded UI-status observation, local metadata, optional access per provider, and visible unknown states. It must not imply task verification, universal agent coverage or unsupported commands.
 
-## Color
+## Palette
 
-| Role | Name | Value |
+| Role | Color | Value |
 | --- | --- | --- |
 | Text and wordmark | Ink | `#20261F` |
 | Brand and primary actions | Olive | `#4B5D3A` |
-| Light surface and reversed logo | Warm ivory | `#F6F4EE` |
-| Quiet supporting surface | Limestone | `#D9DDCF` |
+| Light surface and reversed logo | Ivory | `#F6F4EE` |
+| Supporting lines | Limestone | `#D9DDCF` |
 
-Use the olive symbol and ink wordmark on ivory or white. Use the ivory logo on olive or ink. Keep brand assets flat: no gradients, shadows, glow, or added outlines.
+Use olive/ink on ivory or white, ivory on olive/ink. Flat fills; no glow, gradients, shadows or provider logos.
 
-## Symbol and geometry
+## Native symbol and wordmark
 
-Two stacked brief shapes share a firm vertical spine to form a B. The angled right edge suggests folded paper; the broad base supplies the grounded character of the name without a tree or leaf illustration.
+A P with a round counter and separate round activity point. Master grid 128 × 128; stem begins at (24,16), circular bowl centered (68,52), radius 36; counter radius 14; point centered (96,100), radius 10. The point is part of the identity, not a live status indicator. The P is neither a book nor a B.
 
-The master is a 128 × 128 unit grid. The visible symbol spans `(16,16)` to `(112,112)`. Its outside vertices are `(16,16) (80,16) (104,40) (104,56) (96,64) (112,80) (112,96) (96,112) (16,112)`. The upper counter is `(40,40)` to `(72,56)`; the lower counter is `(40,80)` to `(80,96)`. The single path uses even-odd fill. Preserve these proportions and the asymmetry between the two counters.
+`public/icons/mark.svg` retains the UI import path. `pilovo-symbol.svg` is the matching olive master. The icon uses an olive 96 × 96 rounded tile at (16,16), with the ivory symbol at 75% scale translated (16,16). Native PNGs: 16/32/48/128; large preview: 512. Keep supplied proportions.
 
-`public/icons/mark.svg` is the transparent olive interface asset. `briefoak-symbol.svg` is the matching master. Keep at least 16 master units of clear space around the visible symbol. Minimum standalone size: 16 × 16 px; 24 px or larger is preferred in product headers.
+The six Pilovo glyphs are original local SVG paths defined in `scripts/build-icons.mjs`. No font file or remote font is bundled. The horizontal lockup is 304 × 96; minimum recommended width 152 px. Clear space: 16 master units. Do not stretch or retype the wordmark.
 
-The app icon uses an olive 96 × 96 tile at `(16,16)`, radius 16. Its ivory symbol is scaled to 75% and translated by `(16,16)`. The outer transparent margin is 16 px at 128 px. Use the supplied 16, 32, 48, and 128 px PNGs at their native sizes. The 512 px PNG is for larger previews.
+## Assets and reproduction
 
-## Wordmark and type
-
-The wordmark is original custom vector lettering, not a typeset font. Every letter is a local SVG path, so the mark has no font dependency and distributes no third-party font. Its eight glyph origins are `0, 37, 63, 80, 116, 145, 184, 222` on a 46-unit cap-height grid. The exact outlines are defined in `scripts/build-icons.mjs`.
-
-The horizontal lockup has a 376 × 96 viewBox: symbol at 75% scale; lettering translated to `(104,25)`. Use `briefoak-logo.svg` on light surfaces and `briefoak-logo-light.svg` on dark surfaces. Minimum lockup width: 160 px. Keep 16 viewBox units of clear space outside its bounds. Do not retype, stretch, rotate, rearrange, or add effects to the wordmark.
-
-Product text uses the existing system sans-serif stack. The social-preview tagline uses `Arial, sans-serif`, 28 px, regular, with no font embedded or bundled. The checked PNG is the fixed rendering for sharing; an SVG viewer may use its installed fallback for that tagline only.
-
-## Files and reproduction
-
-| File | Use |
+| Files | Purpose |
 | --- | --- |
-| `briefoak-logo.svg` / `briefoak-logo-light.svg` | Horizontal logos, transparent |
-| `briefoak-symbol.svg` | Transparent symbol master |
-| `briefoak-icon.svg` / `briefoak-icon512.png` | App icon master and large raster |
-| `briefoak-store-small.svg` / `.png` | 440 × 280 Chrome Web Store small tile |
-| `briefoak-store-marquee.svg` / `.png` | 1400 × 560 Chrome Web Store marquee |
-| `briefoak-social-preview.svg` / `.png` | 1280 × 640 GitHub social preview |
-| `briefoak-github-banner.png` | Separate editorial README banner; see `BANNER_PROMPT.md` |
+| `pilovo-logo.svg`, `pilovo-logo-light.svg` | Light/dark horizontal lockup |
+| `pilovo-symbol.svg`, `pilovo-icon.svg`, `pilovo-icon512.png` | Symbol and app icon |
+| `pilovo-store-small.svg/png` | 440 × 280 proposed store tile |
+| `pilovo-store-marquee.svg/png` | 1400 × 560 proposed marquee |
+| `pilovo-social-preview.svg/png` | 1280 × 640 social preview |
+| `pilovo-github-banner.svg/png` | 1280 × 640 README banner |
 
-From `extension/`, run `node scripts/build-icons.mjs` to regenerate the vector assets and icon PNGs. Run `node scripts/build-icons.mjs --media` to also rasterize the three native promotional SVGs using the existing Playwright dependency and installed Chrome; `CHROME_PATH` can select a browser executable. No network resources are loaded. The generator never alters the editorial banner or its provenance file.
+Run `node scripts/build-icons.mjs` for SVGs and analytic icon PNG rendering. Add `--media` to render native SVG tiles with installed Chrome via Playwright; `CHROME_PATH` can select the executable. All content is local. Auxiliary text uses Arial/system fallback; wordmark outlines are platform independent.
 
-The brand-kit copy includes the native sources, rendered assets, application icons, this guide, and the separate editorial banner with its recorded provenance. The native symbol and custom lettering are the authoritative identity.
+The banner's abstract activity rows are editorial shapes, not a product screenshot, user count or measured metric. All promotional tiles visibly say Preview. UI screenshots must separately disclose synthetic data.
+
+Old `briefoak-*` files and [banner provenance](BANNER_PROMPT.md) remain historical references. They are not Pilovo assets and must not be relabeled or used for the current README. Old release archives stay unchanged.

@@ -1,5 +1,7 @@
 # Acceptation UI — autonome 0.2.0
 
+**Archive de validation historique.** Ces résultats ne valident pas Pilovo 0.4.0. Le nouveau pilote observe des indicateurs DOM autorisés ; voir [compatibilité actuelle](compatibility.md) et [gates de version](RELEASE.md). Les affirmations ci-dessous décrivent uniquement la livraison 0.2.0.
+
 Validation du 9 octobre 2026 : 14 groupes UI synthétiques, 5 scans axe sans violation détectée, puis 15 groupes Chromium extension réussis sans erreur de page/console. Un contrôle du dialogue facultatif reste manuel. Chromium 148.0.7778.96 sous Windows, profils de test isolés. Les campagnes 0.1.0 ne sont pas utilisées comme preuve de ces parcours.
 
 Présence d'onglet, préparation locale, envoi/fin déclarés par l'utilisateur, reçu historique et revue humaine restent distincts. Aucun résultat/conversation n'est lu, aucun état d'exécution déduit d'une navigation. Démarrage vide hors profils synthétiques.

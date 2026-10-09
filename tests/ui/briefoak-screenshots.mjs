@@ -22,9 +22,9 @@ const capture = async name => {
 
 try {
   await page.goto(`${process.env.HUB_TEST_URL || 'http://127.0.0.1:5173'}/index.html`);
-  await expect(page.getByRole('heading', { name: 'Préparations', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Activité', exact: true })).toBeVisible();
   await page.locator('.language-select').selectOption('en');
-  await expect(page.locator('.brand strong')).toHaveText('Briefoak');
+  await expect(page.locator('.brand strong')).toHaveText('Pilovo');
   await page.waitForFunction(() => [...document.querySelectorAll('.brand-symbol img')].every(image => image.complete && image.naturalWidth > 0));
   await nav('Missions').click();
   await page.getByRole('button', { name: 'New mission', exact: true }).click();
@@ -51,7 +51,7 @@ try {
   await page.getByText('Show saved prompt', { exact: true }).click();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.locator('.preparation-detail')).toContainText('Sending confirmed by you');
-  await capture('Briefoak_desktop_mission_synthetic.png');
+  await capture('Pilovo_desktop_mission_synthetic.png');
 
   await nav('Settings').click();
   await page.getByLabel('Appearance', { exact: true }).selectOption('dark');
@@ -63,9 +63,9 @@ try {
   await expect(page.locator('.preparation-row')).toHaveCount(3);
   await page.locator('.preparation-workspace').evaluate(element => element.scrollIntoView({ block: 'start' }));
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await capture('Briefoak_360_dark_synthetic.png');
+  await capture('Pilovo_360_dark_synthetic.png');
   expect(errors).toEqual([]);
-  console.log('PASS real Briefoak UI captures with synthetic local examples; no provider interaction');
+  console.log('PASS real Pilovo UI captures with synthetic local examples; no provider interaction');
 } finally {
   await browser.close();
 }

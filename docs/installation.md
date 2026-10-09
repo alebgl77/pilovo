@@ -1,26 +1,30 @@
-# Install Briefoak
+# Install Pilovo 0.4.0 Preview
 
-Briefoak 0.3.0 is an unpacked Chrome extension, not a Chrome Web Store listing. Use Chrome 120 or later. You need your own Claude or ChatGPT web account to send work; Briefoak has no account or paid model API integration.
+Use Chrome 120+. Pilovo is a manually loaded preview; no Chrome Web Store listing or approval is claimed. You use your own ChatGPT or Claude web account. Pilovo's core is free under MIT and needs no account, API key or companion.
 
 ## Release ZIP
 
-1. Open [Releases](https://github.com/alebgl77/briefoak/releases) and download `Briefoak_Chrome_v0.3.0.zip`. If no asset is available, build from source below.
-2. Extract the ZIP into a folder you will keep. The selected folder must contain `manifest.json` directly.
-3. Open `chrome://extensions` and enable **Developer mode**.
-4. Choose **Load unpacked**, select the extracted folder, then pin Briefoak from Chrome's extensions menu.
-5. Open Briefoak. A fresh installation has no sample history.
+1. Check [Releases](https://github.com/alebgl77/pilovo/releases) for a reviewed `Pilovo_Chrome_v0.4.0.zip`. If none is available, build from source below.
+2. Extract it to a folder you will keep. That folder must contain `manifest.json` directly.
+3. Open `chrome://extensions` and turn on **Developer mode**.
+4. Choose **Load unpacked**, select the folder, then pin Pilovo in Chrome's extensions menu.
+5. Open Pilovo. A fresh installation has no fabricated activity or sample history.
 
-No Node.js, Python, CLI, companion or API key is required to use the release. Chrome normally shows developer-mode notices for unpacked extensions. There is no automatic updater in this distribution.
+Node.js, Python, a CLI and a native companion are unnecessary to use the ZIP. This distribution has no automatic updater. Developer-mode notices are normal.
 
 ## First minute
 
-Create a preparation, choose a provider, and enter a title and prompt. Leave prompt retention off to avoid saving its text. Copy it while the form is open, open the provider, then paste and send there yourself. Return to Briefoak and mark it sent when appropriate. Marking completed is also your own declaration.
+Enable ChatGPT or Claude from Pilovo. The optional site grant applies to that provider only; you can grant the other later. Open its web app and send your own prompt. Pilovo observes supported status controls without collecting the conversation.
 
-Granting optional access to the two provider sites enables tab recognition. Denial keeps official-site navigation available. An open tab is not evidence of login or activity. You can revoke site access through Chrome's extension controls.
+Working requires recognized evidence. Response ready requires witnessed work followed by stable ready evidence. Unknown means evidence is absent, inaccessible, stale or not supported by the current adapter; it does not mean the agent stopped. Use focus to inspect the provider directly. Marking an attention item seen only acknowledges it locally.
+
+Remove a site's access through Pilovo or Chrome's extension controls. Revocation invalidates observations and stops renewals; a local lease expires within 15 seconds logically. A suspended page may execute its cleanup later. The toolbar badge is last-observed attention, with best-effort expiry. It is not an OS notification.
+
+The [compatibility record](compatibility.md) lists the pilot's limits. Provider subscriptions and quotas remain separate.
 
 ## Build from source
 
-From a clone or the extracted **Source ZIP** root, use Node.js 22.12+ and run:
+From the clone or Source ZIP root, use Node.js 22.12+:
 
 ```sh
 npm ci
@@ -28,14 +32,22 @@ npm test
 npm run build
 ```
 
-Load `dist/` using the same Chrome steps. To create delivery archives, see [RELEASE](RELEASE.md). The default build has no native companion.
+Load `dist/` using the steps above. [Release checks](RELEASE.md) cover packaging and validation. The default build excludes the historical companion.
 
 ## Updating and removing
 
-Export before changing installations. Replace the files in the existing unpacked folder and click **Reload** in `chrome://extensions`. Keep the same extension identity and profile if you need its stored history. A different unpacked path or extension identity may create separate storage; cross-extension import is not implemented.
+Export saved preparations before changing installations. Replace files in the existing unpacked folder and click **Reload** in `chrome://extensions`. Keep the extension identity/profile to preserve saved history. A different path or identity may create separate storage; cross-extension import is not implemented. Live activity is ephemeral and needs fresh observation after restart.
 
-Removing the extension removes its profile storage. Downloaded exports, backups, clipboard contents, provider conversations and any historical companion installed independently remain separate. Read [Privacy](privacy.md) for purge and retention limits.
+Uninstall removes extension storage. Exports, backups, clipboard, provider conversations and independently installed historical companions remain separate. See [Privacy](privacy.md).
 
-## En français
+## Installation simple en français
 
-Téléchargez puis décompressez le ZIP Chrome. Ouvrez `chrome://extensions`, activez **Mode développeur**, choisissez **Charger l'extension non empaquetée** et sélectionnez le dossier contenant `manifest.json`. Épinglez Briefoak. Préparez, copiez puis collez/envoyez vous-même chez le fournisseur. Les statuts d'envoi et de fin sont vos déclarations. Le [guide français](README.fr.md) décrit les données et les limites.
+1. Récupérez l'archive revue **Pilovo_Chrome_v0.4.0.zip**, puis décompressez-la. Si elle n'est pas publiée, construisez les sources avec les commandes ci-dessus.
+2. Dans Chrome, ouvrez `chrome://extensions`, activez **Mode développeur** puis cliquez sur **Charger l'extension non empaquetée**.
+3. Choisissez le dossier contenant `manifest.json`, épinglez Pilovo et ouvrez son panneau.
+4. Activez **un fournisseur** : ChatGPT et Claude demandent chacun une autorisation distincte. Un refus laisse l'ouverture du site officiel disponible.
+5. Envoyez une consigne dans votre compte fournisseur. Pilovo indique l'état seulement si un signal compatible est observé.
+6. Si l'état est **Inconnu**, rejoignez l'onglet : la preuve peut manquer, expirer, être ralentie en arrière-plan ou correspondre à une interface non reconnue. Ne l'interprétez pas comme une fin.
+7. Retirez l'accès de chaque site depuis Pilovo ou Chrome quand vous le souhaitez.
+
+Le cœur de Pilovo est gratuit. Aucun compte Pilovo, clé API ou compagnon à installer. Le Chrome Web Store serait un parcours futur plus simple, sous réserve d'une soumission acceptée ; ce pilote s'installe manuellement.

@@ -1,5 +1,7 @@
 # Design system
 
+Pilovo 0.4.0 Preview opens on observed web activity. A row shows provider, non-sensitive local identity, evidence state and freshness. Focus and seen acknowledgment are separate actions. Unknown remains explicit when evidence expires or is inaccessible. Manual preparations and historical receipts retain their own provenance in separate views.
+
 The physical scene: a professional reviews an agent's work next to a document in a daylight office, moving between a narrow Chrome side panel and a full browser tab. Light mode uses a white canvas to match that working surface; dark and system modes support evening review without changing semantics.
 
 The color strategy is restrained. OKLCH tokens use a deep olive accent anchored at hue 110 (palette seed 118), near-black ink, neutral gray divisions and pure white surfaces. Accent is reserved for primary actions, selection and meaningful status. Dark mode has separately chosen text, border and action values. Semantic errors and waiting states use text and shape as well as color.
@@ -13,7 +15,7 @@ Actions use a common border, 6 px radius and icon vocabulary. Lucide React suppl
 State design:
 
 - Empty production state explains how actual tasks arrive; there is no seeded demo in product code.
-- Completion is labeled as agent-reported; disconnected transport never rewrites execution.
+- Current response-ready attention requires witnessed work and stable ready evidence; it never verifies task success. Historical completion remains labeled as agent-reported.
 - Missing metadata is explicit. Derived duration uses source timestamps and is marked partial for missing/uncertain evidence.
 - Prompts are collapsed and only appear if actually available under consent.
 - Local SHA-256 check results show their scope, reference origin and time separately from overall verification and human review.
@@ -21,9 +23,11 @@ State design:
 
 Transitions are 140–150 ms for controls and do not conceal initially visible content. Reduced motion removes transitions and the loading pulse. Keyboard navigation, visible focus, native form controls, explicit labels, live errors and 44 px coarse-pointer targets are part of the interface contract.
 
-Observed audit: initial supporting type was too small and dark rail states needed explicit color binding. Both were corrected. Automated browser tests then passed at 1365×900 and 360×800, including five axe WCAG AA scans with no reported violations. See `docs/ui-acceptance.md` for scope and limits; automated accessibility checks are not a substitute for a screen-reader and live Chrome panel review.
+Historical 0.2.0 audit: initial supporting type was too small and dark rail states needed explicit color binding. Both were corrected. Browser tests then passed at 1365×900 and 360×800, including five axe WCAG AA scans. This does not validate the 0.4.0 activity screen. See `docs/ui-acceptance.md` and `docs/RELEASE.md` for scope and remaining manual checks.
 
-## Briefoak identity
+## Pilovo identity
 
-Public name: Briefoak. Descriptor: A local prompt desk for Claude & ChatGPT. The name evokes a brief and a durable place to keep related work. The geometric B mark is an independent product identity; provider names remain plain text without implied endorsement. Actual interface screenshots use fictional local examples and identify the browser-preview context. Retain internal database/native identifiers for compatibility; branding does not change the data contract.
+Public name: Pilovo. Signature: Keep your AI in view. Descriptor: AI activity for Chrome. Preview remains visible in promotional media. The native P monogram uses a round counter and activity point; six custom vector glyphs spell Pilovo. Ink `#20261F`, olive `#4B5D3A`, ivory `#F6F4EE` and limestone `#D9DDCF` define the media palette. See `docs/media/BRAND_GUIDELINES.md`.
+
+Provider names remain plain text without implied endorsement. Abstract banner rows are editorial shapes; interface screenshots use synthetic local examples with explicit captions. No metrics, users or provider execution are fabricated. Internal database/native/protocol identifiers stay stable for compatibility.
 

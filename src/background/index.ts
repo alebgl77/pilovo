@@ -3,14 +3,20 @@ import { errorCode, HubError } from '../shared/errors';
 import { rpcSchema, type RpcRequest } from '../shared/rpc';
 import type { ApiResult } from '../shared/types';
 import { chromeWebBrowser, WebBrowser } from '../platform/web';
+import { WebActivity, chromeActivityAccess } from './activity';
+import { WEB_PROVIDERS } from '../shared/web';
 
 const repository = new HubRepository();
 const web = new WebBrowser(chromeWebBrowser);
 let notifyTimer: ReturnType<typeof setTimeout> | undefined;
 const notify = () => { if (notifyTimer) return; notifyTimer = setTimeout(() => { notifyTimer = undefined; void chrome.runtime.sendMessage({ channel: 'hub.changed' }).catch(() => undefined); }, 200); };
+const activity = new WebActivity(chromeActivityAccess((provider, tabId, current) => web.open(provider, tabId, current), notify));
 const invalidateDiscovery = () => { web.invalidate(); notify(); };
 async function dispatch(request: RpcRequest): Promise<unknown> {
   switch (request.method) {
+    case 'getWebActivity': return activity.snapshot();
+    case 'focusWebActivity': return activity.focus(request.id);
+    case 'acknowledgeWebActivity': return activity.acknowledge(request.id, request.attentionId);
     case 'getWebDiscovery': return web.discovery();
     case 'openWebProvider': return web.open(request.provider, request.tabId);
     case 'createWebPreparation': return repository.createWebPreparation(request.input);
@@ -39,23 +45,27 @@ const ready = (async () => {
   await repository.setBridgeStatus('disabled');
   await repository.setConnection('claude-code', 'disconnected'); await repository.setConnection('codex', 'disconnected');
   await chrome.alarms.create('hub-maintenance', { periodInMinutes: 1 });
+  await chrome.alarms.create('pilovo-activity', { periodInMinutes: 0.5 });
+  activity.start();
 })();
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond: (response: ApiResult<unknown>) => void) => {
+  if (message && (message as { channel?: string }).channel === 'pilovo.observe') { void activity.hint(message, sender).catch(() => undefined); return false; }
   if (sender.id !== chrome.runtime.id || sender.frameId && sender.frameId !== 0 || !sender.url || ![chrome.runtime.getURL('index.html'), chrome.runtime.getURL('sidepanel.html')].some(url => sender.url!.split(/[?#]/)[0] === url)) return false;
   if (!message || (message as { channel?: string }).channel !== 'hub.rpc') return false;
   const parsed = rpcSchema.safeParse((message as { request?: unknown }).request);
   if (!parsed.success) { respond({ ok: false, error: { code: 'validation.invalid', message: 'validation.invalid' } }); return false; }
-  void ready.then(() => dispatch(parsed.data)).then(data => { respond({ ok: true, data }); if (!['getSnapshot', 'getTaskEvents', 'exportData', 'getAgentDetection', 'getWebDiscovery'].includes(parsed.data.method)) notify(); }).catch(error => { const code = errorCode(error); respond({ ok: false, error: { code, message: code } }); });
+  void ready.then(() => dispatch(parsed.data)).then(data => { respond({ ok: true, data }); if (!['getSnapshot', 'getTaskEvents', 'exportData', 'getAgentDetection', 'getWebDiscovery', 'getWebActivity'].includes(parsed.data.method)) notify(); }).catch(error => { const code = errorCode(error); respond({ ok: false, error: { code, message: code } }); });
   return true;
 });
-chrome.permissions.onRemoved.addListener(invalidateDiscovery);
-chrome.permissions.onAdded.addListener(invalidateDiscovery);
-chrome.tabs.onCreated.addListener(invalidateDiscovery);
-chrome.tabs.onRemoved.addListener(invalidateDiscovery);
-chrome.tabs.onUpdated.addListener(invalidateDiscovery);
-chrome.tabs.onAttached.addListener(invalidateDiscovery);
-chrome.tabs.onDetached.addListener(invalidateDiscovery);
-chrome.tabs.onReplaced.addListener(invalidateDiscovery);
+chrome.permissions.onRemoved.addListener(permission => { invalidateDiscovery(); for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) activity.revoke(provider.id); });
+chrome.permissions.onAdded.addListener(permission => { invalidateDiscovery(); for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) activity.reconcile(provider.id); });
+chrome.tabs.onCreated.addListener(tab => { invalidateDiscovery(); if (tab.id !== undefined) activity.updateTab(tab.id, {}, tab); });
+chrome.tabs.onRemoved.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId, true); });
+chrome.tabs.onUpdated.addListener((tabId, change, tab) => { invalidateDiscovery(); activity.updateTab(tabId, change, tab); });
+chrome.tabs.onAttached.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.refresh(); });
+chrome.tabs.onDetached.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId); });
+chrome.tabs.onReplaced.addListener((added, removed) => { invalidateDiscovery(); activity.invalidateTab(removed, true); activity.invalidateTab(added, true); void activity.refresh(); });
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'hub-maintenance') void ready.then(async () => { await repository.cleanup(); notify(); }).catch(() => undefined); });
+chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'pilovo-activity') { activity.expire(); activity.start(); } });
 chrome.runtime.onInstalled.addListener(() => { void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }); });
 chrome.action.onClicked.addListener(tab => { if (tab.windowId !== undefined) void chrome.sidePanel.open({ windowId: tab.windowId }); });

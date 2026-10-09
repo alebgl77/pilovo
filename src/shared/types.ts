@@ -1,6 +1,7 @@
 import type { BrowserActivity, ControlRequest, ControlResponse } from './launch';
 import type { AgentDetection } from './discovery';
 import type { WebDiscovery, WebPreparation, WebPreparationInput, WebPreparationPatch, WebProvider } from './web';
+import type { WebActivitySnapshot } from './activity';
 export type SourceId = 'claude-code' | 'codex';
 export type Execution = 'running' | 'waiting_input' | 'paused' | 'completed' | 'failed' | 'cancelled';
 export type Connection = 'online' | 'stale' | 'disconnected';
@@ -45,9 +46,12 @@ export interface ApiError { code: ErrorCode; message: string }
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
 export interface ExportData { schemaVersion: 1 | 2; exportedAt: string; settings: Settings; missions: Mission[]; tasks: TaskRun[]; events: AgentEvent[]; webPreparations?: WebPreparation[] }
 export interface HubClient {
+  getWebActivity?(): Promise<WebActivitySnapshot>;
+  focusWebActivity?(id: string): Promise<void>;
+  acknowledgeWebActivity?(id: string, attentionId: string): Promise<void>;
   getWebDiscovery?(): Promise<WebDiscovery>;
-  requestWebDiscoveryPermission?(): Promise<boolean>;
-  removeWebDiscoveryPermission?(): Promise<boolean>;
+  requestWebDiscoveryPermission?(provider?: WebProvider): Promise<boolean>;
+  removeWebDiscoveryPermission?(provider?: WebProvider): Promise<boolean>;
   createWebPreparation?(input: WebPreparationInput): Promise<WebPreparation>;
   updateWebPreparation?(id: string, patch: WebPreparationPatch): Promise<WebPreparation>;
   deleteWebPreparation?(id: string): Promise<void>;

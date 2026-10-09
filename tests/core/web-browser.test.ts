@@ -10,11 +10,18 @@ beforeEach(() => {
 });
 
 describe('limited web discovery', () => {
+  it('preserves independently granted provider discovery when the other is denied or unavailable', async () => {
+    vi.mocked(access.hasPermission).mockImplementation(async provider => provider === 'claude-web');
+    let result = await browser.discovery(); expect(result.permission).toBe('not-granted'); expect(result.providers[0]).toMatchObject({ permission: 'granted', tabs: [{ tabId: 42, windowId: 3 }] }); expect(result.providers[1]).toMatchObject({ permission: 'not-granted', tabs: [] });
+    expect(access.queryTabs).toHaveBeenCalledWith(['https://claude.ai/*']);
+    vi.mocked(access.hasPermission).mockImplementation(async provider => { if (provider === 'claude-web') return true; throw new Error('Unavailable'); });
+    result = await browser.discovery(); expect(result.permission).toBe('unavailable'); expect(result.providers[0].tabs).toHaveLength(1); expect(result.providers[1].permission).toBe('unavailable');
+  });
   it.each(['http://claude.ai/', 'https://claude.ai.evil.test/', 'https://sub.claude.ai/', 'https://claude.ai:444/', 'https://user:secret@claude.ai/', 'https://claude.ai./', 'javascript:alert(1)', 'https://chatgpt.com/', 'file:///claude.ai', 'not-a-url'])('rejects unsafe or mismatched URL %s', url => expect(matchesWebProvider(url, 'claude-web')).toBe(false));
   it('allows HTTPS exact provider with default port and query strings without exposing them', async () => {
     expect(matchesWebProvider('https://claude.ai:443/chat/a?secret=1', 'claude-web')).toBe(true);
     vi.mocked(access.queryTabs).mockResolvedValue([tab({ url: 'https://claude.ai/chat/a?private=1' }), tab({ id: 9, url: 'https://chatgpt.com/c/private' }), tab({ id: 10, url: 'https://unrelated.test/private' }), tab({ id: 11, incognito: true }), tab({ id: 12, pendingUrl: 'https://unrelated.test/' }), tab({ id: 13, url: undefined, pendingUrl: 'https://claude.ai/' })]);
-    expect(await browser.discovery()).toEqual({ permission: 'granted', providers: [{ id: 'claude-web', tabs: [{ tabId: 42, windowId: 3 }] }, { id: 'chatgpt-web', tabs: [{ tabId: 9, windowId: 3 }] }] });
+    expect(await browser.discovery()).toEqual({ permission: 'granted', providers: [{ id: 'claude-web', permission: 'granted', tabs: [{ tabId: 42, windowId: 3 }] }, { id: 'chatgpt-web', permission: 'granted', tabs: [{ tabId: 9, windowId: 3 }] }] });
     expect(access.queryTabs).toHaveBeenCalledWith(WEB_ORIGINS);
   });
   it('denial avoids querying tabs, and unavailable APIs report unavailable', async () => {
@@ -22,7 +29,7 @@ describe('limited web discovery', () => {
     vi.mocked(access.hasPermission).mockRejectedValue(new Error('Unavailable')); expect((await browser.discovery()).permission).toBe('unavailable');
   });
   it('drops results when permission is revoked during query', async () => {
-    vi.mocked(access.hasPermission).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    vi.mocked(access.hasPermission).mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValue(false);
     const result = await browser.discovery(); expect(result.permission).toBe('not-granted'); expect(result.providers.every(item => !item.tabs.length)).toBe(true);
   });
   it('does not leak a stale query after revoke followed by regrant', async () => {

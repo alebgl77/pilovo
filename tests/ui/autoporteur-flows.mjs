@@ -10,30 +10,29 @@ page.on('pageerror', error => report.errors.push(error.message));
 const pass = name => { report.checks.push(name); process.stdout.write(`PASS ${name}\n`); };
 const nav = name => page.getByRole('navigation').getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
 const snapshot = () => page.evaluate(() => window.__autoporteur.snapshot());
-const audit = async name => { const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze(); report.accessibility.push({ name, violations: result.violations.map(({ id, nodes }) => ({ id, targets: nodes.map(node => node.target) })) }); expect(result.violations).toEqual([]); };
+const audit = async name => { await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))); await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {})))); const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze(); report.accessibility.push({ name, violations: result.violations.map(({ id, nodes }) => ({ id, targets: nodes.map(node => node.target) })) }); expect(result.violations).toEqual([]); };
 const overflow = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('.page-scroll, dialog')].every(element => element.scrollWidth <= element.clientWidth + 1))).toBe(true);
 try {
   await page.goto(`${process.env.HUB_TEST_URL || 'http://127.0.0.1:5173'}/tests/ui/autoporteur-harness.html`);
+  await expect(page.getByRole('heading', { name: 'Activité', exact: true })).toBeVisible();
+  await nav('Préparations').click();
   await expect(page.getByRole('heading', { name: 'Préparations', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Nouvelle préparation', exact: true })).toBeEnabled();
   expect(await page.locator('body').innerText()).not.toMatch(/compagnon|messagerie native|Lancer la tâche|Installer et configurer/i);
   await audit('Autoporteur-fresh-desktop');
   pass('fresh installation usable without native onboarding or seeded tasks');
-  await page.getByRole('button', { name: 'Activer la détection des onglets' }).click();
+  await page.getByRole('button', { name: 'Connecter Claude', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('permission n’a pas été accordée');
   await page.getByRole('button', { name: 'Ouvrir Claude', exact: true }).click();
   expect(await page.evaluate(() => window.__autoporteur.opens())).toEqual([{ provider: 'claude-web' }]);
   pass('denied optional permission still allows opening a fixed provider');
   await page.evaluate(() => window.__autoporteur.allowPermission());
-  await page.getByRole('button', { name: 'Activer la détection des onglets' }).click();
-  await expect(page.getByText('2 onglets observés')).toBeVisible();
+  await page.getByRole('button', { name: 'Connecter Claude', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Déconnecter Claude', exact: true })).toBeVisible();
   await page.evaluate(() => window.__autoporteur.closeObservedTab());
-  await expect(page.getByText('1 onglet observé', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Retrouver Claude', exact: true }).click();
-  expect((await page.evaluate(() => window.__autoporteur.opens())).at(-1)).toEqual({ provider: 'claude-web', tabId: 12 });
-  await page.getByRole('button', { name: 'Désactiver la détection' }).click();
-  await expect(page.getByText('2 onglets observés')).toHaveCount(0);
-  pass('observed counts refresh after tab notification; known-tab focus and permission revocation');
+  await page.getByRole('button', { name: 'Déconnecter Claude', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Connecter Claude', exact: true })).toBeVisible();
+  pass('provider connection and revocation; ID-bound session focus is covered by activity-flows');
   await page.screenshot({ path: path.join(output, 'Autoporteur-desktop-synthetic.png'), fullPage: true });
   await page.getByRole('button', { name: 'Nouvelle préparation', exact: true }).click();
   const dialog = page.getByRole('dialog');
@@ -57,6 +56,7 @@ try {
   expect(records).toHaveLength(1); expect(records[0].prompt).toBeUndefined(); expect(records[0].status).toBe('prepared');
   const initial = await page.evaluate(() => window.__autoporteur.creates()); expect(initial[0].prompt).toBeUndefined();
   await page.reload();
+  await nav('Préparations').click();
   await expect(page.locator('.preparation-row')).toHaveCount(1);
   pass('unchecked consent excludes prompt from request and durable storage; copy/open do not mark sent');
   await nav('Missions').click();
@@ -88,6 +88,7 @@ try {
   await page.reload();
   records = (await snapshot()).webPreparations; const completed = records.find(record => record.id === retained.id); expect(completed.status).toBe('completed_by_user'); expect(completed.prompt).toBe(retained.prompt); expect(completed.notes).toBe('Reviewed manually — next step agreed.');
   pass('human-marked sending/completion and notes survive reload without erasing consented prompt');
+  await nav('Préparations').click();
   // Two actual repository clients share IndexedDB. Suppress first-window observations
   // to prove the backend, rather than the notification, decides the stale write.
   await page.locator('.preparation-row').filter({ hasText: 'Relecture' }).click();
@@ -168,6 +169,7 @@ try {
   await nav('History').click(); await expect(page.getByRole('heading', { name: 'History', exact: true })).toBeVisible();
   await expect(page.getByText('Claude Code and Codex archives.', { exact: false })).toBeVisible();
   await page.goto(`${process.env.HUB_TEST_URL || 'http://127.0.0.1:5173'}/tests/ui/autoporteur-harness.html?legacy`);
+  await nav('Preparations').click();
   await expect(page.getByRole('link', { name: 'Open Claude', exact: true })).toHaveAttribute('href', 'https://claude.ai/');
   await page.getByRole('button', { name: 'New preparation', exact: true }).click();
   await page.getByLabel('Title', { exact: true }).fill('Unavailable save'); await dialog.getByRole('button', { name: 'Save', exact: true }).click();

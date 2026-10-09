@@ -5,16 +5,23 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
-import { allowedSource, crc32, publishDirectory, scanText, validateManifest, walkFiles, zipBuffer } from './publication-lib.mjs';
+import { allowedSource, crc32, publishDirectory, scanText, validateChromeFiles, validateManifest, walkFiles, zipBuffer } from './publication-lib.mjs';
 
-const metadata = { name: 'briefoak', version: '0.3.0' };
+const metadata = { name: 'pilovo', version: '0.4.0' };
 const lock = { ...metadata, packages: { '': metadata } };
-const manifest = { manifest_version: 3, version: metadata.version, background: { service_worker: 'background.js' }, permissions: ['storage', 'sidePanel', 'alarms'], optional_host_permissions: ['https://claude.ai/*', 'https://chatgpt.com/*'] };
+const manifest = { manifest_version: 3, version: metadata.version, background: { service_worker: 'background.js' }, permissions: ['storage', 'sidePanel', 'alarms', 'scripting'], optional_host_permissions: ['https://claude.ai/*', 'https://chatgpt.com/*'], content_security_policy: { extension_pages: "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" } };
 test('manifest accepts exact contract and rejects drift, extra capabilities and malformed versions', () => {
   validateManifest(manifest, metadata, lock);
-  for (const change of [{ version: '0.2.0' }, { permissions: [...manifest.permissions, 'tabs'] }, { optional_host_permissions: ['https://*/*'] }, { host_permissions: ['<all_urls>'] }, { optional_permissions: ['scripting'] }, { content_scripts: [] }, { externally_connectable: {} }]) assert.throws(() => validateManifest({ ...manifest, ...change }, metadata, lock));
+  for (const change of [{ version: '0.2.0' }, { permissions: [...manifest.permissions, 'tabs'] }, { permissions: ['storage', 'sidePanel', 'alarms'] }, { optional_host_permissions: ['https://*/*'] }, { optional_host_permissions: [...manifest.optional_host_permissions, 'https://example.com/*'] }, { host_permissions: ['<all_urls>'] }, { optional_permissions: ['scripting'] }, { content_scripts: [] }, { externally_connectable: {} }, { content_security_policy: { extension_pages: "script-src 'self' https://example.com; object-src 'none'" } }]) assert.throws(() => validateManifest({ ...manifest, ...change }, metadata, lock));
   assert.throws(() => validateManifest(manifest, { ...metadata, version: '../escape' }, lock));
   assert.throws(() => validateManifest(manifest, metadata, { ...lock, version: '0.2.0' }));
+});
+test('Chrome artifact includes the isolated observer and rejects unreviewed files', () => {
+  const files = ['manifest.json', 'index.html', 'sidepanel.html', 'background.js', 'observer.js', 'icons/mark.svg', ...[16, 32, 48, 128].map(size => `icons/icon${size}.png`), ...['en', 'fr'].map(locale => `_locales/${locale}/messages.json`), 'assets/main-example.js', 'assets/main-example.css'];
+  validateChromeFiles(files);
+  assert.throws(() => validateChromeFiles(files.filter(file => file !== 'observer.js')), /Missing Chrome artifact: observer.js/);
+  for (const file of ['content.js', 'observer.js.map', 'assets/private.txt', 'companion/native.cjs', 'tests/profile/Preferences', 'outputs/report.json', 'marketing/banner.png']) assert.throws(() => validateChromeFiles([...files, file]), /Unexpected Chrome archive content/);
+  assert.throws(() => validateChromeFiles(files.filter(file => !file.endsWith('.css'))), /Missing Chrome UI assets/);
 });
 test('publication allowlist excludes profiles, generated files, credentials and ancestor paths', () => {
   for (const good of ['package-lock.json', 'src/ui/App.tsx', 'tests/core/repository.test.ts', '.github/workflows/ci.yml', 'docs/privacy.md']) assert.equal(allowedSource(good), true, good);

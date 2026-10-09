@@ -1,82 +1,48 @@
-# Briefoak — positionnement et lancement international
+# Pilovo — positionnement et lancement international
 
-Document de travail du 9 octobre 2026. Les données concurrentes sont des observations datées, les cibles ci-dessous sont des objectifs d'apprentissage. Aucune traction de Briefoak n'est revendiquée. Aucun message, article ou campagne externe n'a été envoyé.
+Document de travail du 10 octobre 2026 pour **0.4.0 Preview**. Aucune traction, campagne envoyée, couverture universelle ou supériorité prouvée n'est revendiquée. Les volumes et seuils ci-dessous sont des objectifs futurs.
 
-## Une promesse étroite et vérifiable
+## Promesse et périmètre
 
-**A local prompt desk for Claude & ChatGPT.**
+**Keep your AI in view.**
+**AI activity for Chrome.**
 
-Pour les consultants, chercheurs et rédacteurs qui passent d'un compte web à l'autre, Briefoak propose un endroit où préparer les consignes, regrouper une mission et retrouver ce que l'on a soi-même déclaré envoyé ou terminé. Le produit conserve une séparation visible entre le travail préparé, l'action humaine et un résultat réellement observé.
+Pilovo aide les personnes qui travaillent dans ChatGPT et Claude à repérer des indicateurs compatibles et à rejoindre le bon onglet. Le cœur gratuit sous MIT n'impose ni compte Pilovo, clé API, compagnon ni abonnement Pilovo. Les règles et quotas des fournisseurs restent applicables.
 
-Trois verbes organisent la présentation : **Prepare → Copy → Follow through**. En français : **Préparer → Copier → Garder le fil**. Les boutons de téléchargement dirigent vers la livraison GitHub à charger manuellement. Aucun bouton Chrome Web Store n'apparaît tant qu'il n'existe pas de fiche publiée.
+Le pilote observe localement des contrôles et annonces d'état dédiés du DOM après accord individuel par site. Il ne collecte pas les conversations, consignes, réponses complètes ou titres d'onglets. Les métadonnées d'activité sont temporaires ; les préparations manuelles sauvegardées restent un espace distinct.
 
-Le bénéfice à tester est la continuité personnelle du travail, pas l'automatisation. Une personne peut préparer des consignes pour plusieurs fournisseurs, consigner sa décision et revenir à la mission. Elle copie, colle et envoie elle-même. L'extension ne lit aucune conversation ni réponse et ne vérifie pas l'exécution.
+Les adaptateurs EN/FR sont expérimentaux. Un état inconnu indique une absence de preuve exploitable, notamment après expiration ou ralentissement d'un onglet. Réponse prête exige un travail observé puis un signal stabilisé ; vu est un acquittement local. Le badge représente la dernière attention observée, avec nettoyage best effort. Ni notification système, ni arrêt/pause/lancement, ni contrôle natif n'est proposé.
 
-Cette cible et ce bénéfice sont des hypothèses. Le marché contient déjà des outils locaux et multifornisseurs : le caractère local n'est pas une preuve d'unicité.
+L'hypothèse à tester : cette visibilité limitée peut aider à reprendre plusieurs travaux sans relire ou copier leurs échanges. Elle ne prouve ni gain de temps ni préférence utilisateur.
 
-## Ce que montrent des produits établis
+## Identité et preuves
 
-Observations de sources primaires du 9 octobre 2026. Les chiffres affichés peuvent évoluer. Les utilisateurs d'une fiche Chrome Web Store, une note et une déclaration d'éditeur ne mesurent pas la même chose ; ils ne prouvent ni revenu, ni rétention, ni effet causal d'une décision de design.
+Pilovo utilise un monogramme P original, un point d'activité et la palette encre/olive/ivoire/calcaire. Signature anglaise stable, documentation et interface EN/FR. Le screening du nom est préliminaire, sans garantie juridique, recherche exhaustive de marque, propriété de domaine ou exclusivité démontrée.
 
-| Référence | Signal observé | Enseignement possible pour Briefoak |
+La bannière est une composition vectorielle, pas une capture du produit. Les captures d'interface contiennent des données synthétiques clairement annoncées. Une démo réelle devra être produite avec accord, contenu fictif et matrice de compatibilité visible. La preuve manuelle actuelle de sélecteurs n'est pas un test authentifié complet de l'extension ; voir [Compatibilité](compatibility.md).
+
+Le téléchargement reste une installation manuelle de préversion. Un parcours Chrome Web Store plus simple dépendra d'une soumission acceptée. Ne pas afficher de bouton d'installation en boutique tant que la fiche n'est pas publiée.
+
+## Cinq étapes proposées
+
+| Étape | Travail proposé | Critère futur, non acquis |
 | --- | --- | --- |
-| [Sider](https://sider.ai/) | L'éditeur annonce 10 millions d'utilisateurs actifs ; ce n'est pas un compteur d'installations Chrome vérifié ici. | Expliquer un travail concret et montrer le produit immédiatement. |
-| [AIPRM](https://chromewebstore.google.com/detail/aiprm-for-chatgpt/ojnbohmppadfgpejeebfnmnknjdlckgj) | Fiche affichant 1 million d'utilisateurs, note 3,9. | Une promesse autour de la préparation des prompts est compréhensible sans vocabulaire d'orchestration. |
-| [Text Blaze](https://chromewebstore.google.com/detail/text-blaze-templates-and/idgadaccgipmpannjkmfddolnnhmeklj) | Fiche affichant 800 000 utilisateurs, note 4,9. | Illustrer les gestes et le temps de reprise du travail avec de vrais exemples. |
-| [Raindrop.io](https://chromewebstore.google.com/detail/raindropio/ldgfbffkinooeloadekpmfoklnobpien) | Fiche affichant 500 000 utilisateurs, note 4,1. | Présenter l'organisation comme une activité familière. |
-| [Todoist pour Chrome](https://chromewebstore.google.com/detail/todoist-for-chrome-planne/jldhpllghnbhlbpcmnajkpdmadaolakh) | Fiche affichant 500 000 utilisateurs, note 4,7. | Rendre le prochain geste visible et garder les états compréhensibles. |
-| [Superpower ChatGPT](https://chromewebstore.google.com/detail/superpower-for-chatgpt/amhmeenmapldpjdedekalnfifgnpfnkc) | Fiche affichant 100 000 utilisateurs, note 4,5. | Nommer clairement le fournisseur concerné et la catégorie d'usage. |
-| [Threadlane](https://chromewebstore.google.com/detail/threadlane/fgajmfkookghcacddnmhfkamefndgfei) | Présente déjà un espace local entre fournisseurs, notes/surlignage, consignes de révision et suivi automatique en bêta. | Éviter « premier espace local multifornisseur » et différencier précisément le périmètre d'accès. |
+| 1 — Pilote international | Inviter volontairement 30 pilotes dans au moins 3 pays, utilisant leurs comptes web habituels. Tester l'installation et la compréhension avec exemples fictifs. | 30 participants et diversité de pays à recruter ; documenter refus, abandons et états inconnus sans demander de conversations privées. |
+| 2 — Langues et premier usage | Stabiliser EN + FR, puis envisager ES/PT selon les retours réels. Expliquer séparément l'accord de chaque fournisseur et l'état inconnu. | Décisions de traduction fondées sur les besoins constatés ; aucune langue future annoncée comme disponible. |
+| 3 — Démo et compatibilité | Produire une courte démo réelle, dater la matrice par fournisseur/locale/capacité et rendre les limites visibles. | Qualifier les parcours permission, streaming, fin, erreur/quota et arrière-plan sur l'artefact exact. |
+| 4 — Adaptateurs ouverts et benchmark public | Publier fixtures synthétiques, cas ambigus, méthode, dénominateurs et résultats reproductibles. Accepter des contributions ciblées. | Une cible de 99 % éventuelle reste un objectif de benchmark à définir et mesurer, jamais un résultat déjà obtenu. |
+| 5 — Lancement ciblé autorisé | Préparer des messages pour quelques communautés pertinentes ; demander l'autorisation nécessaire, respecter leurs règles, puis mesurer les retours consentis. | Aucune publication ni campagne externe sans autorisation explicite. Une approbation de store reste un processus séparé. |
 
-Ces références répondent à des besoins différents. Les chiffres ne constituent pas un classement de qualité ni une validation de Briefoak. La comparaison de fonctionnalités repose sur leurs descriptions publiques, sans audit de leur code ou de leurs pratiques de confidentialité.
+Ne pas confondre téléchargements, étoiles GitHub, participants volontaires et utilisateurs actifs. Aucun compteur, avis ou taux de conversion inventé.
 
-Les motifs utiles observés sont une promesse lisible, des captures réelles, un premier parcours court et une explication des permissions. Ce sont des pistes de conception, pas une preuve que ces motifs ont causé leur popularité.
+## Retours sans télémétrie intégrée
 
-## Différenciation à éprouver
+Privilégier entretiens volontaires, scénarios fictifs et formulaire séparé minimal. Demander la version Chrome, la locale et les étapes de reproduction ; éviter profils, exports privés, captures de conversations ou données de compte. Aucune télémétrie n'est ajoutée à l'extension par ce plan.
 
-| Question d'un utilisateur | Réponse actuelle de Briefoak |
-| --- | --- |
-| Dois-je brancher une clé API ou payer un modèle via cette extension ? | Non. Le travail se déroule dans vos comptes web habituels ; leurs règles et quotas restent applicables. |
-| Faut-il donner mes conversations à l'extension ? | Non. Elle ne lit ni pages de conversation ni réponses. L'accès de site facultatif sert aux métadonnées des onglets correspondants. |
-| Peut-elle envoyer ou vérifier un travail à ma place ? | Non. Copie, navigation, envoi chez le fournisseur et déclarations de statut sont des actions distinctes. |
-| Est-ce que « local » signifie chiffré ? | Non. Briefoak n'ajoute pas de chiffrement au profil Chrome ou aux exports. |
-| Puis-je reprendre ma mission dans une autre machine ? | L'export JSON existe, mais import et synchronisation ne sont pas implémentés. |
-| Est-ce un produit mature disponible en boutique ? | C'est une première livraison GitHub à installer manuellement. Les contrôles exécutés et manuels restants sont documentés. |
+## Textes de présentation
 
-L'hypothèse de préférence est simple : certaines personnes accepteront un geste manuel supplémentaire en échange d'un périmètre facile à comprendre. Cette préférence doit être observée ; elle n'autorise aucune affirmation générale de supériorité ou de sécurité.
+**EN:** “Pilovo keeps your AI in view. Observe supported ChatGPT and Claude activity indicators locally, then return to the right tab. Experimental Chrome preview, with optional access per site.”
 
-## Identité et preuves visuelles
+**FR :** « Pilovo garde vos IA en vue. Observez localement les indicateurs compatibles de ChatGPT et Claude, puis retrouvez le bon onglet. Préversion Chrome expérimentale, avec accès facultatif par site. »
 
-Le nom **Briefoak** associe l'idée du brief à un endroit stable où revenir. Une recherche publique préliminaire n'a trouvé aucun exact homonyme dans les sources consultées. Cela ne constitue ni une recherche de marque exhaustive ni une garantie d'exclusivité.
-
-Le README anglais porte la promesse internationale. Une documentation française équivalente accompagne le produit FR/EN. Le logo géométrique B et la palette olive restent indépendants des marques fournisseurs. Les captures montrent l'interface réelle en aperçu navigateur avec données locales fictives ; aucune conversation ou exécution fournisseur n'est représentée comme preuve.
-
-La licence MIT facilite l'examen et la réutilisation du code. Les bibliothèques tierces conservent leurs licences et notices. La transparence du dépôt n'est ni une certification de sécurité ni une approbation de Chrome, Anthropic ou OpenAI.
-
-## Cinq phases de lancement
-
-| Phase | Action concrète proposée | Mesure et seuil de décision proposés |
-| --- | --- | --- |
-| 1 — Préparer la livraison | Publier le dépôt, le guide FR/EN, la notice, les captures, le ZIP et ses sommes de contrôle ; terminer les contrôles manuels prioritaires. | Zéro lien local cassé ; CI verte sur le commit publié ; 3 installations manuelles documentées sur profils vierges avant élargissement. |
-| 2 — Observer le premier usage | Recruter volontairement 5 à 8 consultants/rédacteurs utilisant déjà les deux comptes web. Observer leur première préparation sans voir leurs vrais prompts. | Objectif : 4 personnes sur 5 terminent le parcours en moins de 3 minutes et expliquent correctement ce que l'extension peut voir. Si confusion sur les statuts, corriger avant acquisition. |
-| 3 — Tester le message | Présenter deux formulations honnêtes à de petits groupes anglophones et francophones, avec le même produit et la même démonstration. | Compter les visites consenties de la page de lancement, téléchargements et installations auto-déclarées. Comparer compréhension et objections ; viser 10 retours qualitatifs avant de retenir un message. Aucun taux de conversion prétendu existant. |
-| 4 — Publier dans quelques communautés pertinentes | Préparer un récit de création, une courte vidéo réelle et des exemples consultants/rédacteurs ; respecter les règles de chaque communauté et publier manuellement. | Objectif : 3 canaux pertinents maximum au départ, 15 retours exploitables, temps de support mesuré. Arrêter une diffusion si les personnes attendent une automatisation absente. |
-| 5 — Consolider puis envisager la boutique | Prioriser les frictions récurrentes, documenter les évolutions et décider si une soumission Chrome Web Store est justifiée. | Enquête volontaire à J7 : retour au produit, mission reprise, raison d'abandon. Cible exploratoire : au moins 5 personnes reprennent une mission et 3 recommanderaient le parcours pour un besoin précis. Une petite cohorte n'est pas une preuve statistique. |
-
-Les volumes et seuils sont des choix de travail, pas des engagements commerciaux. GitHub Stars, téléchargements et visites sont des signaux de découverte ; aucun ne mesure à lui seul un utilisateur actif. Les personnes ne sont jamais comptées deux fois comme preuve d'adoption.
-
-## Mesurer sans modifier la promesse locale
-
-Aucune télémétrie n'est ajoutée à l'extension. Pour les premières phases, privilégier entretiens volontaires, observations avec exemples fictifs et questionnaire séparé minimal. Ne pas demander les exports ou conversations privés. Compter les événements publics GitHub comme tels et expliquer leurs limites.
-
-Toute future mesure dans le produit demanderait une proposition distincte, un consentement et une mise à jour des documents ; elle n'est pas implicitement autorisée par ce plan.
-
-## Textes prêts à adapter
-
-**Phrase de présentation anglaise :** “Briefoak is a local prompt desk for Claude & ChatGPT. Prepare a brief, copy it into your web account, and keep a personal record of what you sent.”
-
-**Phrase de présentation française :** « Briefoak rassemble vos préparations Claude et ChatGPT dans un bureau local. Vous copiez et envoyez vous-même, puis gardez le fil de vos missions. »
-
-**Invitation aux premiers retours :** “Try the unpacked preview with a fictional brief. Was it clear what Briefoak stores, what it can see, and which actions remain yours?”
-
-Ces textes sont des brouillons : aucune publication externe n'a été effectuée. Ne pas ajouter d'avis inventé, compteur de clients, badge de certification ou promesse « premier/seul ».
+Ces textes sont des brouillons. Ils n'autorisent aucune publication et ne garantissent ni couverture complète ni réussite des tâches.

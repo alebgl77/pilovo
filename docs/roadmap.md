@@ -1,15 +1,24 @@
-# Roadmap
+# Pilovo roadmap
 
-This is a proposed direction, not a delivery commitment. Requests and evidence can change the order.
+Proposed work, not a delivery commitment. The [activity PRD](activity-manager-prd.md) defines the wider target; [Compatibility](compatibility.md) records the limited preview.
 
-The [activity manager PRD](activity-manager-prd.md) is the authoritative future product target and priority order: observed web activity and focus first, validated agent connectors next, then supported commands. It replaces manual preparation as the product vision. None of those live activity capabilities is implemented in 0.3.0; integration coverage remains conditional on verified signals and contracts.
-
-| Available in 0.3.0 | Other proposed follow-ups |
+| 0.4.0 Preview scope | Further qualification or proposed work |
 | --- | --- |
-| Prepare/copy/open and manually track work | Observe first-run usability with a small group of volunteers |
-| Local notes, missions, search and JSON export | Study whether export-only recovery is sufficient before designing import |
-| Optional exact-site tab discovery | Finish real permission grant/denial/revocation review across supported Chrome versions |
-| French/English and light/dark/system UI | Manual screen-reader, zoom and keyboard review; improve labels from reports |
-| GitHub source and unpacked ZIP workflow | Consider Chrome Web Store submission after publisher and review requirements are ready |
+| Experimental ChatGPT/Claude EN/FR web indicators | Qualify live streaming, completion, explicit attention, quota/error and account variants independently |
+| Per-site grants, local isolated observer | Exact-artifact real permission grant/denial/revocation checks |
+| Freshness/unknown, focus and seen acknowledgment | Longer suspended/background-tab and multiple-window testing |
+| Last-observed toolbar attention badge | Measure MV3 watchdog delays; no strict real-time guarantee |
+| Separate local preparations, notes, missions/export | Study recovery needs before designing import/sync |
+| EN/FR interface and manual unpacked install | Screen reader/zoom review; consider store submission for simpler onboarding |
 
-Automatic sending, reading conversations, agent orchestration, team sync and hosted accounts are outside the current release scope. Any implementation of the new target must address permissions, privacy and the existing manual workflow before release, as required by the PRD.
+No native/external-process control, stop/pause/launch, OS notifications or universal agent supervision is shipped. ChatGPT agent, Claude in Chrome and Claude Code/Codex require separately validated integration contracts. Controls come only after capability-specific proof.
+
+## Five international adoption steps
+
+1. Recruit **30 voluntary pilots across at least 3 countries**; these are targets, not current users.
+2. Stabilize **EN + FR**, then prioritize **ES/PT** if pilot feedback supports them.
+3. Produce a consented **real demo and dated compatibility matrix**, keeping synthetic screenshots distinct.
+4. Open **adapters, fixtures and a reproducible public benchmark**. Reliability targets such as 99% are unmeasured future goals.
+5. Prepare a **targeted, authorized launch** respecting community rules and separate store review.
+
+See [Positioning and launch](positioning-and-launch.md). No outreach or external publication is authorized by this document.

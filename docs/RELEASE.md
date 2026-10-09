@@ -1,10 +1,10 @@
-# Release checks — Briefoak 0.3.0
+# Release checks — Pilovo 0.4.0 Preview
 
-This is an early unpacked extension release. No Chrome Web Store publication, production certification, provider endorsement or real agent execution is claimed.
+The new activity observer is an experimental pilot. No Chrome Web Store approval, authenticated extension E2E, universal agent coverage, reliability percentage or provider endorsement is claimed. See [Compatibility](compatibility.md).
 
-## Reproduce the build
+## Reproduce
 
-Use Node.js 22.12+ (GitHub CI uses Node 22), npm and Git for the publication regression fixture. Run from the repository root:
+Use Node.js 22.12+, npm and Git from the repository root:
 
 ```sh
 npm ci
@@ -16,60 +16,64 @@ npm run build
 npm run package:check
 ```
 
-After reviewing the exact build and documentation, create delivery artifacts:
+Review the exact build and remaining gates before running `npm run package`. The legacy filename `scripts/package-briefoak.mjs` is retained behind that stable command; it now produces:
 
-```sh
-npm run package
-```
+- `release/v0.4.0/Pilovo_Chrome_v0.4.0.zip`
+- `release/v0.4.0/Pilovo_Source_v0.4.0.zip`
+- `release/v0.4.0/Pilovo_SHA256_v0.4.0.json`
+- `release/v0.4.0/Pilovo_THIRD_PARTY_NOTICES_v0.4.0.md`
 
-The command creates `release/v0.3.0/` containing:
+The Chrome ZIP contains the extension at root, project license and dependency notices. The source ZIP is self-contained, with lockfile, scripts, tests and docs; no installed dependencies, builds, outputs, work folders, profiles or secrets. The historical companion remains source-only and is neither built by default nor bundled into Chrome.
 
-- `Briefoak_Chrome_v0.3.0.zip`: built extension with manifest at archive root and dependency notices; no companion.
-- `Briefoak_Source_v0.3.0.zip`: self-contained repository root, including source, tests, scripts, configs, documentation and lockfile; no installed dependencies/build/profile data.
-- `Briefoak_SHA256_v0.3.0.json`.
-- `Briefoak_THIRD_PARTY_NOTICES_v0.3.0.md`.
-
-ZIP creation uses Node's standard library, fixed ZIP timestamps and sorted paths. No Python or files outside this repository are required. Install instructions live in this repository; the runtime archive contains only the extension and dependency notices. Checksums identify bytes; they do not establish publisher authenticity.
-
-The publisher uses a per-version lock and an atomic directory rename. An existing release is never replaced. A crashed process can leave a lock/staging directory: inspect it and remove only the confirmed abandoned directory before retrying. Keep older reviewed releases unchanged.
+ZIP paths are sorted, timestamps fixed and content CRC checked by regression tests. A per-version lock and atomic rename prevent partial publication and overwrites. Older Briefoak releases remain immutable. No final artifact is produced merely by changing this document. Checksums identify bytes, not publisher authenticity.
 
 ## Publication boundaries
 
-`npm run check:publication` inspects an explicit file allowlist, common secret signatures and local Markdown links. `node scripts/check-publication.mjs --list` prints the allowlist inventory. After staging Git changes, `node scripts/check-publication.mjs --staged` scans index bytes and rejects staged files outside the allowlist.
+`check:publication` scans the source allowlist, common secret signatures and local Markdown links. `--staged` scans staged bytes; `--tracked` checks every tracked index path, including forced additions. CI uses tracked mode. These checks are not a complete secret audit: review images and the staged diff separately.
 
-`node scripts/check-publication.mjs --tracked` checks every tracked index file and rejects forbidden paths even if force-added. CI uses this mode. These checks do not prove the absence of every secret. Review the actual staged diff and images. Excluded files include profiles, test results, work/output directories, builds, installed packages, environment files, keys and orchestration state. Runtime source identifiers with the former product name are intentionally retained for compatibility.
+`package:check` aligns package/lock/manifest versions; requires exact storage/sidePanel/alarms/scripting permissions and two optional hosts; rejects required hosts, static content scripts and external messaging; enforces local-only extension CSP. It requires the self-contained isolated `observer.js` and allows only reviewed runtime paths plus built JS/CSS assets. No extra executable, profile or marketing file is accepted in the Chrome bundle.
 
-`package:check` verifies package/lock/manifest version alignment, exact permissions, current built manifest and installed production dependency license texts. The conservative notices inventory includes historical dependencies potentially absent from the Chrome bundle. Historical `package:standalone` and native packagers are retained as reference; do not use them for Briefoak.
+The same workflow includes project and installed production-dependency licenses in both ZIPs. The conservative inventory retains historical dependency notices even when absent from runtime. Deterministic and privacy boundaries must remain intact. Historical standalone/native packagers are not the current release workflow.
 
-## Evidence and remaining review
+## Current evidence and gates
 
-| Check | Status |
+| Check | 0.4.0 status |
 | --- | --- |
-| 0.3.0 typecheck, 234 unit tests and production build | Passed locally on 9 October 2026 |
-| Publication regression tests | 7 passed on 9 October 2026; Windows sandbox blocked junction/rename fixtures, then the identical suite passed outside it |
-| Clean staging build and ZIP checks | Passed 9 October 2026: source allowlist copied to a fresh independent folder, offline npm ci, types, 234 tests, 7 publication tests, build, package check/create; Python ZIP CRC, manifest, source-root, license and exclusion checks passed |
-| 0.3.0 Chromium extension checks | 15 automated groups passed; Chromium 148.0.7778.96, zero page/console errors; 1 real-permission-dialog manual gate |
-| 0.3.0 browser-preview screenshots | Actual interface with fictional local data; no provider execution |
-| 0.2.0 UI regression baseline | 14 UI groups, 5 axe scans with no reported violations, 15 Chromium extension groups passed |
-| Real optional permission grant/denial/revocation | Manual review remains; a fixture with required hosts does not validate Chrome's real permission dialog |
-| Screen reader, zoom, multiple windows | Manual review remains |
-| GitHub CI and exact published artifacts | Verify after public push/release; local checks are not a remote CI result |
+| Native Pilovo vector assets, icon PNGs and preview tiles | Generated with `node scripts/build-icons.mjs --media`, 10 October; banner/icon visually inspected |
+| Publication regressions | 8/8 passed 10 October. Windows sandbox blocked three Git/junction/rename fixtures; identical suite passed outside it. |
+| Unit/type checks | Fresh post-review source staging independently passed `npm test`: 274 tests across 13 files, and `npm run typecheck`, 10 October. Earlier 268-test results are superseded. |
+| Production build | `npm ci --offline --no-audit --no-fund` installed 155 locked packages into fresh staging; `npm run build` passed there. No installed dependencies were copied from the working checkout. |
+| UI regression suites | UI executor reports 8 activity, 14 preparation, 4 race and 12 archive groups passed; 15 axe audits with zero violations, zero browser errors, and 21 UI unit tests passed |
+| Dependency audits | Maintainer reports both full and production dependency audits with zero reported vulnerabilities; this is not proof of absence of defects |
+| Source scan | Fresh staging passed the source scan and `--tracked` check: 171 files each. The tracked check used a separate temporary index, not the working repository index. |
+| Exact built package check | `npm run package:check` passed in fresh staging: 171 source files, 14 runtime files and 99 production dependency license records. |
+| Final archive integrity | CRC/content/license checks, SHA-256 digests, deterministic reconstruction and the exact extracted Chrome ZIP no-grant smoke are delivery gates recorded in the separate release QA handoff. |
+| Final source staging | Fresh post-review source copied through the source allowlist; sorted SHA-256 inventory records exact bytes. The pre-fix provisional snapshot is obsolete. |
+| Security review | Final delta review approved: no remaining P1/P2 findings; reviewer independently reproduced all three fixed cases. The revocation/regrant and stale-document focus corrections are included. |
+| ChatGPT French selector evidence | Manually observed streaming and completion UI, 10 October; not an authenticated extension test |
+| Claude French selector evidence | Attempt blocked by quota, stale completion announcer observed; no successful streaming/completion test |
+| Screenshots | Synthetic local fixtures only; not provider execution evidence |
+| Isolated extension fixtures | Final core run: 9 checks passed, including 12 FR/EN DOM cases. The production manifest without grants is checked unchanged; positive observation fixtures use a test-only clone with required hosts. |
+| Real optional permissions and revocation | Native permission-dialog gate remains manual. Unit mocks and required-host fixture clones do not prove real grant/revocation behavior on the release ZIP. |
+| Throttled tabs and restart | Synthetic coverage must remain distinguished from real provider/background qualification |
+| Screen reader, zoom and multiple windows | Manual review still required |
+| Remote CI, repository rename and published asset hashes | Separate maintainer actions; no result implied by local validation |
+| Chrome Web Store | Not submitted/approved by this work |
 
-The 0.2.0 baseline is historical evidence, not proof of a 0.3.0 artifact. The unchanged behavior suite and fresh exact-build checks should be considered separately.
+The existing standalone browser runner uses isolated synthetic provider fixtures and prevents provider access. Its required-host test clone cannot validate the real optional-permission dialog or establish exact-ZIP grant E2E. New activity fixtures and tests likewise do not establish account/locale-wide reliability. Authenticated extension E2E remains untested; Claude's real attempt was quota-blocked. Keep all browser results and private captures outside packages.
 
-The standalone browser runner is `node tests/e2e/standalone-browser.mjs`. It uses isolated profiles, synthetic provider pages and a proxy that prevents provider access; it tests no authenticated account or real agent. `CHROME_PATH` chooses an installed compatible Chromium executable; `STANDALONE_EXTENSION_DIR` selects an extracted Chrome ZIP. UI preview checks use `node tests/ui/autoporteur-flows.mjs` with optional `HUB_TEST_URL` and `CHROME_PATH`.
+Focus must revalidate the current document identity before activation. A browser navigation after that preflight remains a best-effort race boundary; neither focus nor a successful activation response proves current provider execution.
 
-## CI supply-chain review
+## Clean source staging procedure
 
-The workflow uses Ubuntu and Node 22, runs only on `push`, `pull_request` and manual dispatch, and grants only `contents: read`. Checkout does not persist credentials. There is no `pull_request_target`, secret, deployment, package publication or repository write permission. PR code runs as untrusted code without release privileges.
+Prepare a new directory under `work/pilovo-release-stage` (use a unique sibling if it already exists), with a `source/` child. Enumerate the repository with `walkFiles(root, { source: true })` from `scripts/publication-lib.mjs`, then copy only those files while preserving relative paths. Do not recursively copy the repository or installed dependencies. This excludes `node_modules`, `dist`, `work`, `outputs`, profiles, private captures outside the source allowlist, release archives and orchestration state.
 
-Official refs verified with `git ls-remote` on 9 October 2026:
+Record a sorted SHA-256 inventory outside `source/`, verify copied bytes against it, and run the source publication scan from the staged root. Check package/lock/source-manifest consistency and the reviewed built runtime inventory independently. A staging snapshot does not freeze concurrent source edits: compare its hashes against the final reviewed source before using it for release.
 
-| Action | Verified tag | Pinned commit |
-| --- | --- | --- |
-| [actions/checkout](https://github.com/actions/checkout) | v4 | `11d5960a326750d5838078e36cf38b85af677262` |
-| [actions/setup-node](https://github.com/actions/setup-node) | v4 | `49933ea5288caeca8642d1e84afbd3f7d6820020` |
+After security review and the final source freeze, install dependencies from the lockfile in the clean source, rerun type/unit/publication checks and build, then perform `package:check`. Final ZIP creation requires the maintainer's explicit go-ahead. Validate ZIP CRC, manifest-root layout, licenses, exclusions and deterministic bytes against that exact staging tree before any upload.
 
-The npm lockfile pins resolved package versions/integrities. `npm ci` still executes dependency install scripts and downloads packages from configured registries, so review lockfile changes. The workflow builds and checks packages but does not upload or publish them. Publishing GitHub releases is a separate maintainer action.
+## Historical evidence
 
-Production dependency audit on 9 October 2026: `npm audit --omit=dev --audit-level=high --json` returned exit 0 and zero reported vulnerabilities across all severities. This is the registry audit result for the checked lockfile, not a guarantee that dependencies are free of defects.
+Briefoak 0.3.0 on 9 October 2026 passed 234 unit tests, typecheck/build, seven publication tests and 15 synthetic Chromium extension groups, with one real-permission-dialog gate. The prior 0.2.0 UI baseline included 14 UI groups and five axe scans. These validate their own older scopes, not Pilovo 0.4.0. [Historical release](releases/v0.3.0.md).
+
+Existing CI is read-only, with pinned actions and no deployment/release credentials. Revalidate the exact pushed commit and workflow result before publication. The 9 October dependency audit reported zero known production vulnerabilities for that lockfile; it is historical evidence, not a guarantee about all defects.

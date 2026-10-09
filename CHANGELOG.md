@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — Pilovo Preview
+
+- Introduces Pilovo, the native P identity and the promise “Keep your AI in view.”
+- Adds experimental local ChatGPT/Claude web-status observation with separate optional site grants and a bundled isolated observer.
+- Distinguishes witnessed work, response-ready attention after debounce, explicit recognized attention, and unknown/expired evidence; adds focus, seen acknowledgment and a last-observed toolbar badge.
+- Keeps activity metadata ephemeral and manual preparations separate; preserves existing database/protocol identifiers and historical receipts.
+- Updates EN/FR installation, privacy, compatibility and release gates. Claude's quota-blocked stale completion announcer is documented as a counterexample; authenticated extension E2E is not claimed.
+- Retains deterministic packaging and license/privacy checks, with a required observer bundle and exact permission/CSP checks.
+
+This is a pilot scope, not a store release or universal agent manager. Final validation and publication remain separate gates in [RELEASE](docs/RELEASE.md). Older Briefoak archives remain unchanged.
+
 ## 0.3.0 — Briefoak
 
 - Introduces the Briefoak name and visual identity for the local Claude/ChatGPT prompt workspace.

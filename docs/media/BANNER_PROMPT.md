@@ -1,5 +1,7 @@
 # Banner provenance
 
+Historical Briefoak artwork only. Current Pilovo media is native SVG/code output from `scripts/build-icons.mjs`; this image is not reused or relabeled for Pilovo.
+
 Created on 2026-10-09 with the built-in image generation tool. The banner is an editorial brand illustration, not a product screenshot. The source PNG is kept unchanged as `briefoak-github-banner.png`. Native vector logos and extension icons are built separately.
 
 ## Exact generation prompt

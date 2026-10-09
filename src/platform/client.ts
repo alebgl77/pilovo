@@ -3,7 +3,7 @@ import { HubError } from '../shared/errors';
 import type { ApiResult, HubClient } from '../shared/types';
 import type { RpcRequest } from '../shared/rpc';
 import { hashFile } from '../domain/verification';
-import { emptyWebDiscovery, WEB_ORIGINS } from '../shared/web';
+import { emptyWebDiscovery, WEB_ORIGINS, WEB_PROVIDERS, type WebProvider } from '../shared/web';
 
 const isExtension = typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
 async function rpc<T>(request: RpcRequest): Promise<T> {
@@ -15,13 +15,17 @@ async function rpc<T>(request: RpcRequest): Promise<T> {
   return response.data;
 }
 function extensionClient(): HubClient {
+  const origins = (provider?: WebProvider) => provider ? [WEB_PROVIDERS.find(item => item.id === provider)!.pattern] : [...WEB_ORIGINS];
   const nativeUnavailable = async (): Promise<never> => { throw new HubError('bridge.unavailable'); };
   const navigationUnavailable = async (): Promise<never> => { throw new HubError('permission.denied'); };
   return {
+    getWebActivity: () => rpc({ method: 'getWebActivity' }),
+    focusWebActivity: id => rpc({ method: 'focusWebActivity', id }),
+    acknowledgeWebActivity: (id, attentionId) => rpc({ method: 'acknowledgeWebActivity', id, attentionId }),
     getWebDiscovery: () => rpc({ method: 'getWebDiscovery' }),
     // Keep request() directly in the UI's click call stack; the worker never requests permissions.
-    requestWebDiscoveryPermission: () => chrome.permissions.request({ origins: [...WEB_ORIGINS] }),
-    removeWebDiscoveryPermission: () => chrome.permissions.remove({ origins: [...WEB_ORIGINS] }),
+    requestWebDiscoveryPermission: provider => chrome.permissions.request({ origins: origins(provider) }),
+    removeWebDiscoveryPermission: provider => chrome.permissions.remove({ origins: origins(provider) }),
     createWebPreparation: input => rpc({ method: 'createWebPreparation', input }),
     updateWebPreparation: (id, patch) => rpc({ method: 'updateWebPreparation', id, patch }),
     deleteWebPreparation: id => rpc({ method: 'deleteWebPreparation', id }),
@@ -58,6 +62,8 @@ function previewClient(): HubClient {
   const unavailable = async (): Promise<never> => { throw new HubError('runtime.unavailable'); };
   void repo.cleanup().catch(() => undefined);
   return {
+    getWebActivity: async () => ({ availability: 'unavailable', observations: [], observedAt: Date.now() }),
+    focusWebActivity: unavailable, acknowledgeWebActivity: unavailable,
     getWebDiscovery: async () => emptyWebDiscovery('unavailable'),
     requestWebDiscoveryPermission: async () => false, removeWebDiscoveryPermission: async () => true,
     createWebPreparation: input => change(repo.createWebPreparation(input)),

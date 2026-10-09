@@ -17,7 +17,7 @@ const api: HubClient = {
   subscribe: listener => { tabListeners.add(listener); const unsubscribe = client.subscribe(() => { if (!frozenSnapshot) listener(); }); return () => { tabListeners.delete(listener); unsubscribe(); }; },
   getSnapshot: async () => ({ ...frozenSnapshot || await client.getSnapshot(), mode: 'extension' }),
   updateWebPreparation: async (id, patch) => { updates.push(structuredClone({ id, patch })); try { return await client.updateWebPreparation!(id, patch); } catch (error) { frozenSnapshot = undefined; throw error; } },
-  getWebDiscovery: async () => permission ? { permission: 'granted', providers: [{ id: 'claude-web', tabs: [{ tabId: 12, windowId: 3 }, { tabId: 13, windowId: 3 }].slice(0, tabCount) }, { id: 'chatgpt-web', tabs: [] }] } : emptyWebDiscovery('not-granted'),
+  getWebDiscovery: async () => permission ? { permission: 'granted', providers: [{ id: 'claude-web', permission: 'granted', tabs: [{ tabId: 12, windowId: 3 }, { tabId: 13, windowId: 3 }].slice(0, tabCount) }, { id: 'chatgpt-web', permission: 'granted', tabs: [] }] } : emptyWebDiscovery('not-granted'),
   requestWebDiscoveryPermission: async () => { permission = !deny; return permission; },
   removeWebDiscoveryPermission: async () => { permission = false; return true; },
   openWebProvider: async (provider, tabId) => { opens.push({ provider, tabId }); },

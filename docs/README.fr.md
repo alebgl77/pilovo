@@ -1,41 +1,48 @@
-# Briefoak
+# Pilovo
 
-**Un bureau local pour vos consignes Claude et ChatGPT.**
+**Gardez vos IA en vue.**
+Activité IA pour Chrome · **Préversion 0.4.0**
 
-Préparez une consigne, rassemblez le travail d'une mission et retrouvez ce que vous avez envoyé. Briefoak accompagne vos comptes web habituels dans le panneau latéral de Chrome ou dans un onglet complet.
+Gardez le fil de vos onglets ChatGPT et Claude dans un même espace. Repérez le travail observé, remarquez une réponse prête et retrouvez la bonne session. Pilovo est une préversion expérimentale pour Chrome.
 
-**Direction produit future : voir et gérer l'activité IA dans votre navigateur.** Le [PRD de gestion d'activité](activity-manager-prd.md) définit la nouvelle cible pour les conversations web, ChatGPT agent, Claude in Chrome et Claude Code/Codex reliés à Chrome. La version 0.3.0 n'implémente pas cette gestion en direct ; l'observation et les commandes futures dépendent de signaux vérifiés et de contrats d'intégration pris en charge.
+![Pilovo — Keep your AI in view. Preview.](media/pilovo-github-banner.png)
 
-![Briefoak](media/briefoak-github-banner.png)
+[English](../README.md) · [Installation pas à pas](installation.md) · [Confidentialité](privacy.md) · [Compatibilité](compatibility.md)
 
-[English](../README.md) · [Installation](installation.md) · [Confidentialité](privacy.md) · [Versions](https://github.com/alebgl77/briefoak/releases)
+## Premier parcours
 
-![Interface réelle avec des exemples fictifs](media/screenshots/Briefoak_desktop_mission_synthetic.png)
+1. Ouvrez Pilovo et activez l'observation de **ChatGPT** ou de **Claude**. Chaque site demande son propre accord.
+2. Utilisez votre compte web habituel et envoyez vous-même une consigne chez le fournisseur.
+3. Consultez l'état observé dans Pilovo. Rejoignez le bon onglet, puis marquez une demande d'attention comme vue si vous le souhaitez.
 
-*Aperçu navigateur de Briefoak avec des exemples locaux fictifs. Les statuts sont déclarés manuellement ; aucune exécution fournisseur n'est montrée.*
+« En cours » repose sur un indicateur reconnu. « Réponse prête » exige un travail d'abord observé, puis un signal de disponibilité stabilisé. « Vu » signifie seulement que vous avez remarqué l'élément. Un onglet ouvert ou une vieille annonce de fin ne prouve ni exécution ni réussite.
 
-## Trois étapes
+« Inconnu » signifie que la preuve manque, a expiré ou n'est plus accessible. Les onglets en arrière-plan peuvent être ralentis par Chrome. La preuve expire logiquement après 15 secondes. Le badge représente la dernière attention observée ; son effacement dépend aussi du réveil du service worker et n'est pas garanti en temps réel. Aucune notification système n'est envoyée.
 
-1. **Préparez.** Choisissez Claude ou ChatGPT, donnez un titre et rédigez votre consigne. Une mission peut regrouper plusieurs préparations. Conserver la consigne est un choix distinct, décoché pour chaque nouvelle préparation.
-2. **Envoyez vous-même.** Copiez, ouvrez l'application, puis collez et envoyez dans votre compte web. Ouvrir un onglet n'envoie rien.
-3. **Gardez le fil.** Déclarez l'envoi puis la fin dans Briefoak. Ajoutez une note locale pour reprendre votre travail.
+![Panneau Pilovo avec exemples synthétiques](media/screenshots/Pilovo_activity_desktop_synthetic.png)
 
-Recherche, notes, missions, export JSON, suppression, rétention, français/anglais et thèmes clair/sombre/système sont disponibles.
+*Interface réelle alimentée par des fixtures locales synthétiques. Cette capture ne représente pas une session fournisseur réelle ni une preuve d'exécution.*
 
-## Installer
+## Installer la préversion
 
-Téléchargez le ZIP Chrome dans les [versions](https://github.com/alebgl77/briefoak/releases), décompressez-le, ouvrez `chrome://extensions`, activez le mode développeur puis **Charger l'extension non empaquetée**. Sélectionnez le dossier contenant `manifest.json`. Si aucune archive n'est encore publiée, suivez la [construction depuis les sources](../README.md#build-from-source).
+Chrome 120+ est requis. Pilovo n'est pas encore approuvé sur le Chrome Web Store. Téléchargez une archive revue `Pilovo_Chrome_v0.4.0.zip` si elle est disponible dans les [versions](https://github.com/alebgl77/pilovo/releases), ou [construisez les sources](../README.md#build-from-source).
 
-Chrome 120+ est requis. Il s'agit d'une première version à installer manuellement, sans publication Chrome Web Store. Aucun compagnon, CLI, Node.js, clé API ou compte Briefoak n'est requis pour l'utiliser. Les règles, abonnements et quotas des fournisseurs s'appliquent.
+Décompressez le ZIP, ouvrez `chrome://extensions`, activez **Mode développeur**, puis **Charger l'extension non empaquetée**. Sélectionnez le dossier qui contient directement `manifest.json` et épinglez Pilovo. Le [guide d'installation](installation.md) explique les accords individuels et leur retrait.
 
-## Des limites visibles
+Le cœur est gratuit sous MIT. Aucun compte Pilovo, clé API, compagnon, CLI ou Node.js n'est requis pour utiliser l'extension. Les comptes, abonnements et quotas des fournisseurs restent applicables.
 
-L'accès facultatif aux seuls sites `claude.ai` et `chatgpt.com`, demandé ensemble, permet de retrouver leurs onglets. Sans accord, l'ouverture des sites officiels reste possible. Un onglet présent ne prouve ni connexion ni activité.
+## Données et limites
 
-Briefoak ne lit pas les conversations, réponses, cookies ou identifiants. Il n'envoie pas de consigne, ne pilote aucun agent et ne vérifie pas l'exécution. Les statuts sont vos déclarations. Aucun backend, appel d'API de modèle, suivi distant ou synchronisation cloud.
+L'observateur isolé est activé uniquement sur le site autorisé. Il examine des contrôles et indicateurs d'état du DOM, sans collecter les consignes, réponses complètes, titres d'onglets, captures, cookies ou identifiants. Les métadonnées d'activité sont locales et temporaires ; elles sont reconstruites avec des preuves fraîches après redémarrage. Le retrait d'accès invalide l'observation ; le bail local impose une coupure logique sous 15 secondes, même si Chrome retarde le nettoyage.
 
-Les données restent dans votre profil Chrome, **sans chiffrement ajouté par Briefoak**. La consigne n'est enregistrée qu'avec votre accord pour cette préparation ; sans accord, copiez-la avant de fermer le formulaire. Titres, statuts, dates, identifiants et notes saisies séparément restent enregistrés. La rétention vaut 30 jours par défaut et fonctionne lorsque l'extension est active.
+Les adaptateurs EN/FR sont expérimentaux. Une inspection manuelle a vu les indicateurs ChatGPT FR le 10 octobre 2026. Le test Claude était bloqué par quota, malgré une annonce de fin persistante ; son streaming n'a pas été capturé. Ces observations ne valident pas un parcours réel de bout en bout de l'extension. Voir la [matrice de compatibilité](compatibility.md).
 
-L'export JSON version 2 est disponible, sans fonction d'import. La purge conserve préférences et identifiants minimaux historiques contre le rejeu. La désinstallation efface le stockage restant de l'extension ; exports, sauvegardes, presse-papiers et conversations fournisseur se gèrent séparément. Consultez la [notice](privacy.md) et le [contrat technique](core-contract.md).
+Pilovo permet de rejoindre un onglet et d'acquitter localement l'attention. Il ne lance, n'arrête ou ne met en pause aucun agent, ne soumet ni consigne ni approbation et ne pilote pas Claude Code/Codex ou une autre extension. Aucun backend, API de modèle, suivi distant ou synchronisation cloud.
 
-[Contribuer](../CONTRIBUTING.md) · [Assistance](../SUPPORT.md) · [Feuille de route proposée](roadmap.md). Briefoak est disponible sous [licence MIT](../LICENSE). Les composants tiers conservent leurs propres licences ; leurs notices accompagnent les archives.
+## Vos préparations manuelles
+
+Les préparations, notes et missions restent disponibles séparément. Copiez puis envoyez vous-même ; leurs statuts restent vos déclarations. Conserver une consigne exige un choix distinct, décoché à chaque création. Titres, dates, notes et liens de mission sont enregistrés même sans conservation de la consigne.
+
+Le stockage et les exports ne sont pas chiffrés par Pilovo. La rétention de l'historique vaut 30 jours par défaut, lorsque l'extension est active. Export JSON 2 disponible, sans import ni synchronisation. La purge garde les préférences et les identifiants historiques minimaux contre le rejeu. Exports, sauvegardes, presse-papiers et conversations fournisseur se gèrent séparément. [Notice de confidentialité](privacy.md).
+
+[Contribuer](../CONTRIBUTING.md) · [Assistance](../SUPPORT.md) · [Feuille de route](roadmap.md) · [Licence MIT](../LICENSE). Les anciennes livraisons Briefoak restent un historique distinct.

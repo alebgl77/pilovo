@@ -3,7 +3,7 @@ import { access, readdir, readFile, realpath, writeFile } from 'node:fs/promises
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fileEntries, publishDirectory, validateManifest, walkFiles, zipBuffer } from './publication-lib.mjs';
+import { fileEntries, publishDirectory, validateChromeFiles, validateManifest, walkFiles, zipBuffer } from './publication-lib.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -47,18 +47,18 @@ async function collect(name, from) {
 }
 for (const name of Object.keys(metadata.dependencies)) await collect(name, root);
 const inventory = [...packages.values()].sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
-const notices = `# Third-party notices — Briefoak ${metadata.version}\n\nThis conservative inventory covers installed production dependencies, including historical native/MCP dependencies whose code may not be in the Chrome bundle. No native companion is shipped. Development tools are not redistributed as installed packages. Versions and full license text are read from installed packages.\n\n` + inventory.map(pkg => `## ${pkg.name} ${pkg.version}\n\nLicense: ${typeof pkg.license === 'string' ? pkg.license : JSON.stringify(pkg.license)}\n\n${pkg.licenses.map(item => `### ${item.file}\n\n${item.text.trim()}\n`).join('\n')}`).join('\n');
+const notices = `# Third-party notices — Pilovo ${metadata.version}\n\nThis conservative inventory covers installed production dependencies, including historical native/MCP dependencies whose code may not be in the Chrome bundle. No native companion is shipped. Development tools are not redistributed as installed packages. Versions and full license text are read from installed packages.\n\n` + inventory.map(pkg => `## ${pkg.name} ${pkg.version}\n\nLicense: ${typeof pkg.license === 'string' ? pkg.license : JSON.stringify(pkg.license)}\n\n${pkg.licenses.map(item => `### ${item.file}\n\n${item.text.trim()}\n`).join('\n')}`).join('\n');
 const sourceFiles = await walkFiles(root, { source: true });
 if (metadata.license !== 'MIT' || lock.packages?.['']?.license !== 'MIT') throw new Error('Expected reviewed MIT license metadata.');
 const projectLicense = await readFile(path.join(root, 'LICENSE'));
 const chromeFiles = await walkFiles(path.join(root, 'dist'));
-if (chromeFiles.some(file => /(^|\/)(?:companion|tests|node_modules)(?:\/|-)/.test(file))) throw new Error('Unexpected Chrome archive content.');
+validateChromeFiles(chromeFiles);
 console.log(JSON.stringify({ mode: args[0], version: metadata.version, sourceFiles: sourceFiles.length, chromeFiles: chromeFiles.length, productionLicenses: inventory.length }));
 if (args[0] === '--check') process.exit(0);
 const shared = [{ name: 'THIRD_PARTY_NOTICES.md', bytes: Buffer.from(notices) }, { name: 'DEPENDENCY_LICENSES.json', bytes: Buffer.from(JSON.stringify(inventory.map(({ name, version, license }) => ({ name, version, license })), null, 2) + '\n') }];
 const artifacts = [
-  { name: `Briefoak_Chrome_v${metadata.version}.zip`, entries: [...await fileEntries(path.join(root, 'dist'), chromeFiles), { name: 'LICENSE', bytes: projectLicense }, ...shared] },
-  { name: `Briefoak_Source_v${metadata.version}.zip`, entries: [...await fileEntries(root, sourceFiles), ...shared] },
+  { name: `Pilovo_Chrome_v${metadata.version}.zip`, entries: [...await fileEntries(path.join(root, 'dist'), chromeFiles), { name: 'LICENSE', bytes: projectLicense }, ...shared] },
+  { name: `Pilovo_Source_v${metadata.version}.zip`, entries: [...await fileEntries(root, sourceFiles), ...shared] },
 ];
 const hashes = [];
 const destination = await publishDirectory(path.join(root, 'release'), metadata.version, async stage => {
@@ -67,7 +67,7 @@ const destination = await publishDirectory(path.join(root, 'release'), metadata.
     await writeFile(path.join(stage, artifact.name), bytes, { flag: 'wx' });
     hashes.push({ file: artifact.name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
   }
-  await writeFile(path.join(stage, `Briefoak_SHA256_v${metadata.version}.json`), JSON.stringify({ version: metadata.version, artifacts: hashes }, null, 2) + '\n', { flag: 'wx' });
-  await writeFile(path.join(stage, `Briefoak_THIRD_PARTY_NOTICES_v${metadata.version}.md`), notices, { flag: 'wx' });
+  await writeFile(path.join(stage, `Pilovo_SHA256_v${metadata.version}.json`), JSON.stringify({ version: metadata.version, artifacts: hashes }, null, 2) + '\n', { flag: 'wx' });
+  await writeFile(path.join(stage, `Pilovo_THIRD_PARTY_NOTICES_v${metadata.version}.md`), notices, { flag: 'wx' });
 });
 console.log(JSON.stringify({ destination: path.relative(root, destination), created: hashes }, null, 2));

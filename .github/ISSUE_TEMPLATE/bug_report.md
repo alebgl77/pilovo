@@ -1,12 +1,12 @@
 ---
 name: Bug report
-about: A reproducible Briefoak problem
+about: A reproducible Pilovo problem
 title: ''
 labels: ''
 assignees: ''
 ---
 
-**Versions:** Briefoak, Chrome, operating system
+**Versions:** Pilovo, Chrome, operating system
 
 **Steps to reproduce:**
 

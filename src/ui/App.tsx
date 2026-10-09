@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Check, ChevronRight, Folder, History, FilePenLine, Plus, Search, Settings2, SlidersHorizontal, X } from 'lucide-react';
+import { Activity, ArrowUpRight, Check, ChevronRight, Folder, History, FilePenLine, Plus, Search, Settings2, SlidersHorizontal, X } from 'lucide-react';
 import { client } from '../platform/client';
 import type { HubClient, Mission, Snapshot, TaskRun } from '../shared/types';
 import { ActionDialog, EmptyState, FirstSteps, SourceIcon, Status, type ActionRunner, type DialogRequest } from './components';
@@ -7,10 +7,11 @@ import { errorMessage, executions, formatDate, translator, type MessageKey } fro
 import { attentionReason, emptyFilters, filterTasks, sourceName, type Filters, type Route } from './model';
 import { SettingsPage, TaskDetail } from './pages';
 import { WebPreparations } from './WebPreparations';
+import { WebActivity } from './WebActivity';
 
 export function App({ api = client }: { api?: HubClient }) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [route, setRoute] = useState<Route>('preparations');
+  const [route, setRoute] = useState<Route>('activity');
   const [selected, setSelected] = useState<string | null>(null);
   const [createPreparationRequest, setCreatePreparationRequest] = useState(0);
   const [filters, setFilters] = useState<Filters>({ ...emptyFilters });
@@ -59,7 +60,7 @@ export function App({ api = client }: { api?: HubClient }) {
   const renameMission = (mission: Mission) => setDialog({ title: t('renameMission'), kind: 'mission', initialValue: mission.title, submitLabel: t('save'), success: 'missionUpdated', onSubmit: title => api.updateMission(mission.id, title) });
   const deleteMission = (mission: Mission) => setDialog({ title: `${t('deleteMission')} « ${mission.title} »`, description: t('deleteMissionText'), kind: 'deleteMission', danger: true, submitLabel: t('delete'), success: 'missionDeleted', onSubmit: async (_, deleteTasks) => { await api.deleteMission(mission.id, deleteTasks); setFilters(current => ({ ...current, mission: '' })); } });
 
-  if (!snapshot) return <div className="loading-screen"><div className="brand-symbol"><img src="/icons/mark.svg" alt="Briefoak" width="28" height="28" /></div>{loadError ? <><h1>{t('errorTitle')}</h1><p role="alert">{errorMessage(loadError, language)}</p><button className="button primary" onClick={() => { void refresh(); }}>{t('retry')}</button></> : <><p role="status">{t('loading')}</p><div className="loading-lines" aria-hidden="true"><span /><span /><span /></div></>}</div>;
+  if (!snapshot) return <div className="loading-screen"><div className="brand-symbol"><img src="/icons/mark.svg" alt="Pilovo" width="28" height="28" /></div>{loadError ? <><h1>{t('errorTitle')}</h1><p role="alert">{errorMessage(loadError, language)}</p><button className="button primary" onClick={() => { void refresh(); }}>{t('retry')}</button></> : <><p role="status">{t('loading')}</p><div className="loading-lines" aria-hidden="true"><span /><span /><span /></div></>}</div>;
 
   const attentionCount = snapshot.tasks.filter(task => attentionReason(task)).length;
   const counts = { questions: snapshot.tasks.filter(task => attentionReason(task) === 'questions').length, results: snapshot.tasks.filter(task => attentionReason(task) === 'results').length, failures: snapshot.tasks.filter(task => attentionReason(task) === 'failures').length, signals: snapshot.tasks.filter(task => attentionReason(task) === 'signals').length };
@@ -68,12 +69,12 @@ export function App({ api = client }: { api?: HubClient }) {
   const currentMission = snapshot.missions.find(mission => mission.id === filters.mission);
   const hasFilters = Boolean(filters.query || filters.source || filters.execution || filters.since || (filters.mission && route !== 'missions'));
   const isTaskRoute = route === 'attention' || route === 'history';
-  const navItems = [{ key: 'preparations', icon: FilePenLine, count: (snapshot.webPreparations || []).filter(item => item.status !== 'completed_by_user').length }, { key: 'missions', icon: Folder, count: snapshot.missions.length }, { key: 'history', icon: History }, { key: 'settings', icon: Settings2 }] as const;
-  const pageTitle = ({ preparations: 'preparations', attention: 'attentionTitle', missions: 'missions', history: 'history', connections: 'connectionsTitle', settings: 'settings' } as const)[route];
-  const pageSubtitle = ({ preparations: 'preparationsSubtitle', attention: 'attentionSubtitle', missions: 'missionsSubtitle', history: 'historySubtitle', connections: 'connectionsSubtitle', settings: 'settingsSubtitle' } as const)[route];
+  const navItems = [{ key: 'activity', icon: Activity }, { key: 'preparations', icon: FilePenLine, count: (snapshot.webPreparations || []).filter(item => item.status !== 'completed_by_user').length }, { key: 'missions', icon: Folder, count: snapshot.missions.length }, { key: 'history', icon: History }, { key: 'settings', icon: Settings2 }] as const;
+  const pageTitle = ({ activity: 'activity', preparations: 'preparations', attention: 'attentionTitle', missions: 'missions', history: 'history', connections: 'connectionsTitle', settings: 'settings' } as const)[route];
+  const pageSubtitle = ({ activity: 'activitySubtitle', preparations: 'preparationsSubtitle', attention: 'attentionSubtitle', missions: 'missionsSubtitle', history: 'historySubtitle', connections: 'connectionsSubtitle', settings: 'settingsSubtitle' } as const)[route];
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">{language === 'fr' ? 'Aller au contenu' : 'Skip to content'}</a>
-    <aside className="rail"><div className="brand"><div className="brand-symbol"><img src="/icons/mark.svg" alt="" width="28" height="28" /></div><div><strong>Briefoak</strong><span>{t('localWorkspace')}</span></div></div>
+    <aside className="rail"><div className="brand"><div className="brand-symbol"><img src="/icons/mark.svg" alt="" width="28" height="28" /></div><div><strong>Pilovo</strong><span>{t('localWorkspace')}</span></div></div>
       <nav aria-label={language === 'fr' ? 'Navigation principale' : 'Main navigation'}>{navItems.map(({ key, icon: Icon, ...item }) => <button className={`nav-item${route === key ? ' selected' : ''}`} key={key} aria-current={route === key ? 'page' : undefined} onClick={() => navigate(key)}><Icon size={18} strokeWidth={1.7} aria-hidden="true" /><span>{t(key)}</span>{'count' in item && item.count > 0 && <span className="nav-count">{item.count}</span>}</button>)}</nav>
       <div className="rail-bottom"><div className="local-caption"><span className="local-dot" />{t('localOnly')}</div></div>
     </aside>
@@ -93,7 +94,7 @@ export function App({ api = client }: { api?: HubClient }) {
         <div className={`workspace${selectedTask ? ' has-selection' : ''}`}><section className="task-list" aria-label={t(route)}><div className="list-caption"><span>{currentMission?.title || t(route)}</span><span>{tasks.length} {t(tasks.length === 1 ? 'task' : 'tasks')}</span></div>{tasks.length ? <ul>{tasks.map(task => <TaskRow key={task.key} task={task} snapshot={snapshot} selected={task.key === selected} onSelect={() => { selectedTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSelected(task.key); }} />)}</ul> : <EmptyState title={t(hasFilters ? 'noResults' : route === 'history' ? 'noHistory' : 'clearAttention')} text={t(hasFilters ? 'noResultsText' : route === 'history' ? 'noHistoryText' : 'clearAttentionText')} action={hasFilters ? <button className="button" onClick={() => setFilters({ ...emptyFilters })}>{t('clearFilters')}</button> : !snapshot.tasks.length ? <button className="button" onClick={() => navigate('preparations')}>{t('connectAgents')}<ChevronRight size={16} /></button> : undefined} />}</section>
           <section className="task-pane" aria-label={selectedTask?.title || t('details')}>{selectedTask ? <TaskDetail key={selectedTask.key} task={selectedTask} snapshot={snapshot} api={api} run={run} busy={busy} openDialog={setDialog} onBack={() => { setSelected(null); requestAnimationFrame(() => selectedTrigger.current?.isConnected && selectedTrigger.current.focus()); }} /> : snapshot.tasks.length ? <EmptyState title={t('selectTask')} text={t('selectTaskText')} /> : <FirstSteps t={t} connect={() => navigate('preparations')} />}</section>
         </div>
-      </> : route === 'preparations' || route === 'missions' ? <WebPreparations key={route} createRequest={createPreparationRequest} snapshot={snapshot} api={api} run={run} busy={busy} openDialog={setDialog} missionId={route === 'missions' ? filters.mission : undefined} showServices={route === 'preparations'} /> : <SettingsPage snapshot={snapshot} api={api} run={run} busy={busy} openDialog={setDialog} />}
+      </> : route === 'activity' ? <WebActivity api={api} en={language === 'en'} /> : route === 'preparations' || route === 'missions' ? <WebPreparations key={route} createRequest={createPreparationRequest} snapshot={snapshot} api={api} run={run} busy={busy} openDialog={setDialog} missionId={route === 'missions' ? filters.mission : undefined} showServices={route === 'preparations'} /> : <SettingsPage snapshot={snapshot} api={api} run={run} busy={busy} openDialog={setDialog} />}
     </main>
     {dialog && <ActionDialog key={`${dialog.title}-${dialog.initialValue || ''}`} request={dialog} dismiss={() => setDialog(null)} run={run} busy={busy} t={t} error={feedback?.error ? feedback.text : undefined} />}
   </div>;
