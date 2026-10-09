@@ -1,0 +1,56 @@
+{
+  "name": "briefoak",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build && node scripts/build.mjs",
+    "build:companion": "node scripts/build-companion.mjs",
+    "test": "vitest run",
+    "test:core": "vitest run tests/core",
+    "test:companion": "node --import tsx --test tests/companion/*.test.ts",
+    "preview": "vite preview --host 127.0.0.1",
+    "package:standalone": "node scripts/package-standalone.mjs",
+    "package": "node scripts/package-briefoak.mjs --create",
+    "package:check": "node scripts/package-briefoak.mjs --check",
+    "test:publication": "node --test scripts/publication.test.mjs",
+    "check:publication": "node scripts/check-publication.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest",
+    "idb": "latest",
+    "lucide-react": "latest",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "latest",
+    "@playwright/test": "latest",
+    "@types/chrome": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "esbuild": "latest",
+    "fake-indexeddb": "latest",
+    "typescript": "latest",
+    "tsx": "latest",
+    "vite": "latest",
+    "vitest": "latest"
+  },
+  "description": "A local prompt desk for Claude & ChatGPT.",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alebgl77/briefoak.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alebgl77/briefoak/issues"
+  },
+  "license": "MIT"
+}
