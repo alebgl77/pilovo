@@ -4,6 +4,8 @@
 
 Prepare a clear brief, keep related work together, and remember what you sent. Briefoak is a Chrome side panel for people who work across their existing Claude and ChatGPT web accounts.
 
+**Product direction (future): See and manage AI activity in your browser.** The [activity manager PRD](docs/activity-manager-prd.md) defines the new target for web conversations, ChatGPT agent, Claude in Chrome and Claude Code/Codex connected to Chrome. Version 0.3.0 does not implement this live activity manager; future observation and controls depend on verified signals and supported integration contracts.
+
 ![Briefoak — A local prompt desk for Claude & ChatGPT.](docs/media/briefoak-github-banner.png)
 
 [Install](docs/installation.md) · [Français](docs/README.fr.md) · [Privacy](docs/privacy.md) · [Releases](https://github.com/alebgl77/briefoak/releases) · [Contribute](CONTRIBUTING.md)

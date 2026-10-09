@@ -4,6 +4,8 @@
 
 Préparez une consigne, rassemblez le travail d'une mission et retrouvez ce que vous avez envoyé. Briefoak accompagne vos comptes web habituels dans le panneau latéral de Chrome ou dans un onglet complet.
 
+**Direction produit future : voir et gérer l'activité IA dans votre navigateur.** Le [PRD de gestion d'activité](activity-manager-prd.md) définit la nouvelle cible pour les conversations web, ChatGPT agent, Claude in Chrome et Claude Code/Codex reliés à Chrome. La version 0.3.0 n'implémente pas cette gestion en direct ; l'observation et les commandes futures dépendent de signaux vérifiés et de contrats d'intégration pris en charge.
+
 ![Briefoak](media/briefoak-github-banner.png)
 
 [English](../README.md) · [Installation](installation.md) · [Confidentialité](privacy.md) · [Versions](https://github.com/alebgl77/briefoak/releases)
