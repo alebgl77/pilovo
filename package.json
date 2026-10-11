@@ -41,7 +41,18 @@
     "vite": "latest",
     "vitest": "latest"
   },
-  "description": "AI activity for Chrome. Keep your AI in view. Preview.",
+  "description": "Chrome extension that shows whether your ChatGPT and Claude tabs are working, have a response ready or need your attention. Local side panel, optional access per site, no telemetry. Open-source preview.",
+  "keywords": [
+    "chrome-extension",
+    "browser-extension",
+    "manifest-v3",
+    "side-panel",
+    "chatgpt",
+    "claude",
+    "local-first",
+    "privacy"
+  ],
+  "homepage": "https://github.com/alebgl77/pilovo#readme",
   "engines": {
     "node": ">=22.12.0"
   },

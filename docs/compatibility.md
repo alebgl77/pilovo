@@ -1,6 +1,8 @@
 # Pilovo 0.4.0 — experimental compatibility
 
-Dated 10 October 2026. This pilot observes a bounded set of web UI controls. Provider changes, account variants, locale and page throttling can produce unknown states. There is no measured coverage percentage or universal agent support.
+French summary: [FAQ, Compatibilité](faq.fr.md#compatibilité).
+
+Evidence dated 10 October 2026; table last reviewed 11 October 2026. This pilot observes a bounded set of web UI controls. Provider changes, account variants, locale and page throttling can produce unknown states. There is no measured coverage percentage or universal agent support.
 
 | Surface / capability | Preview status | Evidence and limits |
 | --- | --- | --- |
@@ -18,6 +20,11 @@ Dated 10 October 2026. This pilot observes a bounded set of web UI controls. Pro
 | ChatGPT agent / Claude in Chrome | Not supported as dedicated integrations | Ordinary web indicators do not prove internal agent tasks, remote-browser state or extension state. |
 | Claude Code / Codex / native applications | Not supported | No live connector or external-process control is bundled. |
 | OS notifications per service | Unreleased, off by default | Opt-in per service with Chrome's optional `notifications` permission, requested from the settings checkbox; 0.4.0 has none. A new attention identity on a checked service, in a tab not in front, creates one notification with the service, reason and session number only; seen, replacement, evidence lapsed beyond 35 s, navigation, closure, revocation or unchecking clears it; a click focuses through the usual revalidation without acknowledging. Unchecking the last service clears notifications before removing the permission; after a removal elsewhere Chrome refuses to clear them, so any left are cleared only once the permission is granted again. Covered by unit tests with mocked `chrome.notifications` and `chrome.permissions`, synthetic harness flows for the setting, and one synthetic real-Chromium (headless) run with a test-only required permission (one notification for a tab behind the extension page, none for the tab in front, cleared by seen). The real permission prompt, clicking a real notification, and display, grouping, sounds, focus modes and notification-center retention on Windows, macOS, Linux and ChromeOS are not yet checked manually. A throttled background tab whose evidence lapses keeps its notification, standing for the same signal sampled again, when the next sample comes within 35 s (the 30 s activity alarm normally provides one); a later sample of the same signal is not notified again, and a worker restart notifies a persisting signal once more. |
+| ChatGPT and Claude desktop or mobile apps | Not supported | Only `https://chatgpt.com/*` and `https://claude.ai/*` pages in Chrome tabs are observed. |
+| Other AI chat websites | Not supported | Optional host access is limited to those two origins. |
+| Browsers other than Chrome 120+ | Not supported (Firefox, Safari); not tested (other Chromium-based browsers) | Chrome 120 or later is the only documented requirement (`minimum_chrome_version` 120). |
+| Sound alerts | Not supported | Pilovo plays no sound. With the unreleased OS notifications, the operating system decides whether a notification makes a sound. |
+| Keeping background tabs active | Not supported | Pilovo does not change how Chrome throttles or discards tabs; lapsed evidence becomes unknown. |
 | Stop / pause / resume / launch | Not supported | No such control commands are exposed by this preview; keyboard commands only focus, open the side panel or acknowledge, and a notification click only focuses. |
 
 ## Manual selector evidence

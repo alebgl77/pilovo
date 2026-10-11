@@ -14,6 +14,7 @@
 - `check:publication` refuses raw bidirectional control characters (U+202A–U+202E, U+2066–U+2069) in published text; source writes them as escapes.
 - Fixes the expiry watchdog, which could run a fraction of a millisecond before the earliest deadline (the clock is fractional and timers truncate their delay) and then not re-arm, leaving the badge lit until the next alarm or panel read. It now rounds the delay up and re-arms when nothing has expired yet.
 - Fixes **Open session** and the next-item shortcut, which could fail with **This session could not be opened** on an unchanged tab (present in 0.4.0 for **Open session**): routine page hints arriving during focus's one-second wait before its fresh sample, or a routine sample already in flight, took that sample's slot. While a focus is pending, hints now wait for its own fresh sample, and a sample already in flight is awaited instead of failing focus; it is never used as proof.
+- Documentation: the English and French READMEs open with a definition of Pilovo, a facts table, a table of states and their panel labels, a no-affiliation statement and short FAQs, and move unreleased-feature details to the installation guides; adds `docs/faq.md`, `docs/faq.fr.md`, a French installation guide (`docs/installation.fr.md`), a French permissions table and `CITATION.cff`, and links the v0.4.0 prerelease directly. No product behavior changes.
 
 ## 0.4.0 — Pilovo Preview
 

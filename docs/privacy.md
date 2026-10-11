@@ -1,6 +1,16 @@
 # Privacy and local data — Pilovo 0.4.0 Preview
 
-Updated 10 October 2026. This notice describes the preview's intended data boundaries; it is not a legal certification or Chrome Web Store approval. Contact: [GitHub Issues](https://github.com/alebgl77/pilovo/issues) for non-sensitive questions; [Security](../SECURITY.md) for sensitive reports.
+Updated 11 October 2026 (sections on unreleased features; summary added). This notice describes the preview's intended data boundaries; it is not a legal certification or Chrome Web Store approval. Contact: [GitHub Issues](https://github.com/alebgl77/pilovo/issues) for non-sensitive questions; [Security](../SECURITY.md) for sensitive reports.
+
+French summary: [Confidentialité et permissions](faq.fr.md#confidentialité-et-permissions).
+
+## In short
+
+- Pilovo reads a limited set of page controls and status indicators on chatgpt.com and claude.ai, only after you grant each site; it does not collect full conversations, prompt or response text, tab titles, screenshots, cookies or credentials.
+- Observed activity stays in the extension's memory and is discarded on restart; it is never saved as history or exported.
+- There is no Pilovo backend, account, sync, advertising, remote telemetry or model API call.
+- Manual preparations you save stay in IndexedDB in your Chrome profile, are not encrypted by Pilovo and are deleted after 30 days by default (adjustable from 1 to 365), a cleanup that runs only while the extension is active; a prompt is stored only if you opt in for that preparation.
+- Required permissions are `storage`, `sidePanel`, `alarms` and `scripting`; access to `https://chatgpt.com/*` and `https://claude.ai/*` is optional and per site, and can be removed at any time. Unreleased source adds only the optional `notifications`, off by default.
 
 ## Activity observation
 
