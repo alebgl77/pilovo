@@ -12,15 +12,16 @@ let notifyTimer: ReturnType<typeof setTimeout> | undefined;
 const notify = () => { if (notifyTimer) return; notifyTimer = setTimeout(() => { notifyTimer = undefined; void chrome.runtime.sendMessage({ channel: 'hub.changed' }).catch(() => undefined); }, 200); };
 const activity = new WebActivity(chromeActivityAccess((provider, tabId, current) => web.open(provider, tabId, current), notify));
 const invalidateDiscovery = () => { web.invalidate(); notify(); };
-// The toolbar title follows the app's language setting. A reply applies only if no newer call has applied yet, so an
-// older call resolving late cannot restore its language. updateSettings can reject after its settings write committed
-// (the retention cleanup that follows is a separate write), so a failed call re-reads the persisted language.
+// The toolbar title follows the app's language setting, and automatic seen its delay (off by default). A reply applies
+// only if no newer call has applied yet, so an older call resolving late cannot restore its values. updateSettings can
+// reject after its settings write committed (the retention cleanup that follows is a separate write), so a failed call
+// re-reads the persisted settings.
 let settingsCalls = 0, settingsApplied = 0;
-const applyLanguage = (call: number, language: unknown) => { if (call > settingsApplied) { settingsApplied = call; activity.setLanguage(language); } };
+const applySettings = (call: number, settings: Settings) => { if (call > settingsApplied) { settingsApplied = call; activity.setLanguage(settings.language); activity.setAutoAcknowledge(settings.autoAcknowledgeSeconds); } };
 const updateSettings = async (patch: Partial<Settings>) => {
   const call = ++settingsCalls;
-  try { const settings = await repository.updateSettings(patch); applyLanguage(call, settings.language); return settings; }
-  catch (error) { await repository.snapshot().then(snapshot => applyLanguage(call, snapshot.settings.language), () => undefined); throw error; }
+  try { const settings = await repository.updateSettings(patch); applySettings(call, settings); return settings; }
+  catch (error) { await repository.snapshot().then(snapshot => applySettings(call, snapshot.settings), () => undefined); throw error; }
 };
 async function dispatch(request: RpcRequest): Promise<unknown> {
   switch (request.method) {
@@ -77,9 +78,14 @@ chrome.tabs.onRemoved.addListener(tabId => { invalidateDiscovery(); activity.inv
 chrome.tabs.onUpdated.addListener((tabId, change, tab) => { invalidateDiscovery(); activity.updateTab(tabId, change, tab); });
 // A move within a window changes only positions, never evidence or the session, so rows keep their state.
 chrome.tabs.onMoved.addListener(() => { void activity.reindex(); });
-chrome.tabs.onAttached.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.refresh(); void activity.reindex(); });
-chrome.tabs.onDetached.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.reindex(); });
-chrome.tabs.onReplaced.addListener((added, removed) => { invalidateDiscovery(); activity.invalidateTab(removed, true); activity.invalidateTab(added, true); void activity.refresh(); });
+chrome.tabs.onAttached.addListener((tabId, info) => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.refresh(); void activity.reindex(); activity.tabViewChanged(tabId, info.newWindowId); });
+chrome.tabs.onDetached.addListener((tabId, info) => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.reindex(); activity.tabViewChanged(tabId, info.oldWindowId); });
+chrome.tabs.onReplaced.addListener((added, removed) => { invalidateDiscovery(); activity.invalidateTab(removed, true); activity.invalidateTab(added, true); void activity.refresh(); activity.viewChanged(); });
+// Optional automatic seen (off by default) follows what the user looks at: the active tab of Chrome's focused window.
+// These events only stop any dwell and, when the setting is on, trigger a fresh query; WINDOW_ID_NONE: Chrome lost focus.
+// A tab event that touches neither the viewed tab nor its window leaves a running dwell alone.
+chrome.tabs.onActivated.addListener(info => { activity.tabViewChanged(info.tabId, info.windowId); });
+chrome.windows.onFocusChanged.addListener(windowId => { activity.viewChanged(windowId); });
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'hub-maintenance') void ready.then(async () => { await repository.cleanup(); notify(); }).catch(() => undefined); });
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'pilovo-activity') { activity.expire(); activity.start(); } });
 // Chrome's command gesture does not survive an await: the nothing-to-review case opens the panel synchronously,

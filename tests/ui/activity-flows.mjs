@@ -400,6 +400,69 @@ try {
   await expect(page.getByRole('button', { name: 'Tout marquer comme vu', exact: true })).toBeVisible();
   pass('French/English, 360px light/dark, elapsed durations, session names and positions, mark all and shortcut hint, reduced motion, no overflow and zero axe violations; hint hidden without shortcut access');
 
+  // Settings: optional automatic seen, off by default, as a labeled native select with its meaning as description.
+  const nav = name => page.getByRole('navigation').getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
+  const semantics = page.locator('.activity-semantics');
+  await expect(semantics).not.toContainText('après');
+  for (const [width, theme] of [[1365, 'light'], [360, 'dark']]) {
+    await page.setViewportSize({ width, height: 900 }); await page.evaluate(value => window.__activity.settings({ language: 'fr', theme: value, autoAcknowledgeSeconds: 0 }), theme);
+    await nav('Paramètres').click();
+    const autoSeen = page.getByRole('combobox', { name: 'Marquer comme vu automatiquement', exact: true });
+    await expect(page.getByRole('heading', { name: 'Activité', level: 2, exact: true })).toBeVisible();
+    await expect(autoSeen).toHaveValue('0'); await expect(autoSeen.locator('option')).toHaveText(['Désactivé', '5 s', '15 s', '30 s']);
+    // A no-break space keeps each delay with its unit (the matcher above normalizes whitespace).
+    expect(await autoSeen.locator('option').allTextContents()).toEqual(['Désactivé', '5\u00a0s', '15\u00a0s', '30\u00a0s']);
+    await expect(autoSeen).toHaveAccessibleDescription('Une attention est marquée comme vue après ce délai passé sur l’onglet concerné, fenêtre active. Vu signifie que vous l’avez remarquée, pas que la tâche a réussi.');
+    await audit(`settings-auto-seen-${width}-${theme}-French`); await overflow();
+    await autoSeen.focus(); await autoSeen.selectOption('15');
+    await expect.poll(() => page.evaluate(() => window.__activity.savedSettings().autoAcknowledgeSeconds)).toBe(15);
+    await expect(autoSeen).toHaveValue('15'); await expect(page.getByText('Préférences enregistrées.')).toBeVisible();
+    await nav('Activité').click();
+    await expect(semantics).toContainText('Une attention est marquée comme vue après 15 s sur son onglet, fenêtre active.');
+    expect(await semantics.textContent()).toContain('après 15\u00a0s sur');
+    await overflow();
+  }
+  await page.evaluate(() => window.__activity.settings({ language: 'en' }));
+  await nav('Settings').click();
+  const autoSeenEn = page.getByRole('combobox', { name: 'Mark as seen automatically', exact: true });
+  await expect(autoSeenEn).toHaveValue('15'); await expect(autoSeenEn.locator('option')).toHaveText(['Off', '5 s', '15 s', '30 s']);
+  await expect(autoSeenEn).toHaveAccessibleDescription('An item is marked as seen after this time on its tab, in the focused window. Seen means you noticed it, not that the task succeeded.');
+  await audit('settings-auto-seen-360-dark-English'); await overflow();
+  await autoSeenEn.selectOption('5'); await expect.poll(() => page.evaluate(() => window.__activity.savedSettings().autoAcknowledgeSeconds)).toBe(5);
+  await nav('Activity').click(); await expect(semantics).toContainText('Items are marked as seen after 5 s on their tab, in the focused window.');
+  expect(await semantics.textContent()).toContain('after 5\u00a0s on');
+  await nav('Settings').click(); await autoSeenEn.selectOption('0'); await expect.poll(() => page.evaluate(() => window.__activity.savedSettings().autoAcknowledgeSeconds)).toBe(0);
+  await nav('Activity').click(); await expect(semantics).not.toContainText('marked as seen after');
+  await page.evaluate(() => window.__activity.settings({ language: 'fr', theme: 'light' })); await page.setViewportSize({ width: 360, height: 900 });
+  await expect(page.getByRole('heading', { name: 'Activité', exact: true })).toBeVisible();
+  pass('automatic seen setting: off by default, labeled select with its meaning as description, FR/EN, light/dark, 1365px and 360px, zero axe violations; the activity footer states the delay only when enabled');
+
+  // Seen elsewhere (automatic seen after dwelling on the tab, the keyboard command or another panel) removes the control
+  // that had focus: focus moves to the row's open button, or from mark all to the first row action, never to the page.
+  for (const [language, seenName, openName, allName, seenState] of [['fr', 'Marquer comme vu', 'Ouvrir la session', 'Tout marquer comme vu', 'Vu'], ['en', 'Mark as seen', 'Open session', 'Mark all as seen', 'Seen']]) {
+    await page.evaluate(value => { window.__activity.settings({ language: value }); window.__activity.seed(); }, language);
+    const seenButton = row('attention').getByRole('button', { name: seenName, exact: true });
+    await seenButton.focus(); await page.evaluate(() => window.__activity.seenElsewhere(['attention']));
+    await expect(row('attention').locator('.activity-state')).toHaveText(seenState); await expect(seenButton).toHaveCount(0);
+    await expect(row('attention').getByRole('button', { name: openName, exact: true })).toBeFocused();
+    await page.evaluate(() => { window.__activity.seed(); window.__activity.addAttention(); });
+    const all = page.getByRole('button', { name: allName, exact: true });
+    await all.focus(); await page.evaluate(() => window.__activity.seenElsewhere(['attention-2']));
+    await expect(row('attention-2').locator('.activity-state')).toHaveText(seenState); await expect(all).toHaveCount(0);
+    await expect(page.locator('.activity-row').first().getByRole('button', { name: openName, exact: true })).toBeFocused();
+    await audit(`activity-seen-elsewhere-${language}`);
+    // Focus on any other control stays where it is.
+    const refreshButton = page.getByRole('button', { name: language === 'fr' ? 'Actualiser l’activité' : 'Refresh activity', exact: true });
+    await refreshButton.focus(); await page.evaluate(() => window.__activity.seenElsewhere(['attention']));
+    await expect(row('attention').locator('.activity-state')).toHaveText(seenState); await expect(refreshButton).toBeFocused();
+    // A row that lapses disables its open button: the rename button, which stays focusable, takes focus instead.
+    await page.evaluate(() => window.__activity.seed()); await seenButton.focus(); await page.evaluate(() => window.__activity.expire('attention'));
+    await expect(seenButton).toHaveCount(0); await expect(row('attention').getByRole('button', { name: openName, exact: true })).toBeDisabled();
+    await expect(row('attention').locator('.activity-rename')).toBeFocused();
+  }
+  await page.evaluate(() => window.__activity.settings({ language: 'fr' }));
+  pass('seen elsewhere, as automatic seen does: focus on the removed seen or mark-all button moves to the row actions (the rename button once the row lapsed), never to the page, FR/EN, zero axe violations');
+
   await page.evaluate(() => { window.__activity.hold(true); window.__activity.signal(); });
   const unmountRequest = await page.evaluate(() => window.__activity.pending() - 1);
   // Durations are shown, so the minute ticker is armed; unmounting clears it and the expiry timer.

@@ -16,7 +16,7 @@ beforeEach(async () => {
   api = {
     runtime: { id: 'test-extension', getURL: (path: string) => `chrome-extension://test-extension/${path}`, sendMessage: vi.fn().mockResolvedValue(undefined), connectNative: vi.fn(), onMessage: signal(), onInstalled: signal() },
     permissions: { contains: vi.fn().mockResolvedValue(true), request: vi.fn(), onRemoved: signal(), onAdded: signal() },
-    tabs: { query: vi.fn().mockResolvedValue([{ id: 4, windowId: 1, url: 'https://claude.ai/chat/private', title: 'Private title' }]), get: vi.fn(), create: vi.fn().mockResolvedValue({ id: 5 }), update: vi.fn(), onCreated: signal(), onUpdated: signal(), onRemoved: signal(), onMoved: signal(), onAttached: signal(), onDetached: signal(), onReplaced: signal() },
+    tabs: { query: vi.fn().mockResolvedValue([{ id: 4, windowId: 1, url: 'https://claude.ai/chat/private', title: 'Private title' }]), get: vi.fn(), create: vi.fn().mockResolvedValue({ id: 5 }), update: vi.fn(), onCreated: signal(), onUpdated: signal(), onRemoved: signal(), onMoved: signal(), onAttached: signal(), onDetached: signal(), onReplaced: signal(), onActivated: signal() },
     scripting: { registerContentScripts: vi.fn().mockResolvedValue(undefined), unregisterContentScripts: vi.fn().mockResolvedValue(undefined), executeScript: vi.fn().mockResolvedValue([]) },
     windows: { update: vi.fn(), getLastFocused: vi.fn().mockResolvedValue({ id: 3 }), onFocusChanged: signal() }, commands: { onCommand: signal(), getAll: vi.fn() }, alarms: { create: vi.fn().mockResolvedValue(undefined), onAlarm: signal() }, sidePanel: { setPanelBehavior: vi.fn().mockResolvedValue(undefined), open: vi.fn().mockResolvedValue(undefined) }, action: { onClicked: signal(), setBadgeText: vi.fn().mockResolvedValue(undefined), setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined), setBadgeTextColor: vi.fn().mockResolvedValue(undefined), setTitle: vi.fn().mockResolvedValue(undefined) },
   };
@@ -265,6 +265,118 @@ describe('standalone service worker trust boundary', () => {
     Object.assign(tabs.get(4), { windowId: 2, index: 0 }); api.tabs.onAttached.emit(4, { newWindowId: 2, newPosition: 0 }); await vi.advanceTimersByTimeAsync(0);
     expect(await positions()).toEqual({ 4: [2, 0], 6: [1, 4] });
     expect(JSON.stringify((await rpc({ method: 'getWebActivity' })).data)).not.toMatch(/private-|Private title|https:/);
+  });
+  it('automatic seen is off by default, applies through updateSettings and acknowledges only the active tab of the focused window', async () => {
+    const activationId = crypto.randomUUID(), tab = { id: 4, windowId: 1, index: 2, url: 'https://claude.ai/chat/private', title: 'Private title', status: 'complete' };
+    let evidence = 'input_required', focused: { id?: number; focused: boolean } = { id: 1, focused: true }, active: { id?: number; windowId: number; active: boolean }[] = [{ id: 4, windowId: 1, active: true }];
+    api.tabs.get.mockResolvedValue(tab);
+    api.tabs.query.mockImplementation(async (query: any) => query.active ? active : [tab]);
+    api.windows.getLastFocused.mockImplementation(async () => focused);
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence } }] : []);
+    const sample = async (value: string) => { evidence = value; api.tabs.onUpdated.emit(4, { status: 'complete' }, tab); await vi.advanceTimersByTimeAsync(1100); };
+    const attention = async () => (await rpc({ method: 'getWebActivity' })).data.observations[0].attention;
+    const viewQueries = () => api.tabs.query.mock.calls.filter(([query]: any[]) => query.active).length;
+    // Settings stored before this preference existed (beforeEach) read as off.
+    expect((await rpc({ method: 'getSnapshot' })).data.settings.autoAcknowledgeSeconds).toBe(0);
+    await sample('input_required'); expect(await attention()).toMatchObject({ reason: 'input_required', acknowledged: false });
+    // Off: tab and window events change nothing and Chrome is never asked what is viewed (only the startup window seed).
+    api.tabs.onActivated.emit({ tabId: 4, windowId: 1 }); api.windows.onFocusChanged.emit(1); await vi.advanceTimersByTimeAsync(31_000);
+    expect((await attention()).acknowledged).toBe(false); expect(api.windows.getLastFocused).toHaveBeenCalledOnce(); expect(viewQueries()).toBe(0);
+    // Strict values only, before any change.
+    for (const invalid of [10, -1, 1, '5', 5.5, null, true]) {
+      const request = { method: 'updateSettings', patch: { autoAcknowledgeSeconds: invalid } };
+      expect(rpcSchema.safeParse(request).success, JSON.stringify(invalid)).toBe(false); expect(await rpc(request)).toMatchObject({ ok: false, error: { code: 'validation.invalid' } });
+    }
+    expect(viewQueries()).toBe(0);
+    // On: the worker asks Chrome at once (the tab is already viewed) and acknowledges after exactly 5 s.
+    expect((await rpc({ method: 'updateSettings', patch: { autoAcknowledgeSeconds: 5 } })).data.autoAcknowledgeSeconds).toBe(5);
+    await vi.advanceTimersByTimeAsync(0); expect(viewQueries()).toBe(1); expect(api.tabs.query).toHaveBeenLastCalledWith({ active: true, windowId: 1 });
+    await vi.advanceTimersByTimeAsync(4999); expect((await attention()).acknowledged).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); expect((await attention()).acknowledged).toBe(true);
+    expect(api.action.setBadgeText).toHaveBeenLastCalledWith({ text: '' }); expect(api.action.setTitle).toHaveBeenLastCalledWith({ title: 'Pilovo' });
+    expect(api.tabs.update).not.toHaveBeenCalled(); expect(api.windows.update).not.toHaveBeenCalled();
+    // A new attention while Chrome loses focus (WINDOW_ID_NONE): nothing is acknowledged until the window is focused again.
+    await sample('error_visible'); api.windows.onFocusChanged.emit(-1); await vi.advanceTimersByTimeAsync(10_000);
+    expect(await attention()).toMatchObject({ reason: 'error_visible', acknowledged: false });
+    api.windows.onFocusChanged.emit(1); await vi.advanceTimersByTimeAsync(5000); expect((await attention()).acknowledged).toBe(true);
+    // Another tab activated in the focused window (the full-page panel, say): the attention's tab is not viewed.
+    await sample('input_required'); active = [{ id: 9, windowId: 1, active: true }]; api.tabs.onActivated.emit({ tabId: 9, windowId: 1 });
+    await vi.advanceTimersByTimeAsync(10_000); expect((await attention()).acknowledged).toBe(false);
+    // Back on the tab, but Chrome reports no focused window at the deadline (a missed blur event): still not acknowledged.
+    active = [{ id: 4, windowId: 1, active: true }]; api.tabs.onActivated.emit({ tabId: 4, windowId: 1 }); await vi.advanceTimersByTimeAsync(0);
+    focused = { id: 1, focused: false }; await vi.advanceTimersByTimeAsync(10_000); expect((await attention()).acknowledged).toBe(false);
+    // Setting it back to 0 stops a running dwell.
+    focused = { id: 1, focused: true }; api.windows.onFocusChanged.emit(1); await vi.advanceTimersByTimeAsync(3000);
+    await rpc({ method: 'updateSettings', patch: { autoAcknowledgeSeconds: 0 } }); await vi.advanceTimersByTimeAsync(10_000); expect((await attention()).acknowledged).toBe(false);
+    expect(JSON.stringify(api.tabs.query.mock.calls.filter(([query]: any[]) => query.active))).not.toMatch(/url|title|private/i);
+  });
+  it('automatic seen follows real tab activation, attach and focus events, and ignores tab events in other windows', async () => {
+    const activationId = crypto.randomUUID();
+    let evidence = 'input_required', tab = { id: 4, windowId: 1, index: 2, url: 'https://claude.ai/chat/private', title: 'Private title', status: 'complete' };
+    let focused = { id: 1, focused: true }, active = [{ id: 9, windowId: 1, active: true }];
+    api.tabs.get.mockImplementation(async () => tab);
+    api.tabs.query.mockImplementation(async (query: any) => query.active ? active.filter(item => item.windowId === query.windowId) : [tab]);
+    api.windows.getLastFocused.mockImplementation(async () => focused);
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence } }] : []);
+    const sample = async (value: string) => { evidence = value; api.tabs.onUpdated.emit(4, { status: 'complete' }, tab); await vi.advanceTimersByTimeAsync(1100); };
+    const attention = async () => (await rpc({ method: 'getWebActivity' })).data.observations[0].attention;
+    const asked = () => api.windows.getLastFocused.mock.calls.length;
+    await rpc({ method: 'updateSettings', patch: { autoAcknowledgeSeconds: 5 } }); await sample('input_required');
+    // Another tab (the full-page panel, say) is active in the focused window: no dwell, even after a focus event.
+    api.windows.onFocusChanged.emit(1); await vi.advanceTimersByTimeAsync(10_000); expect((await attention()).acknowledged).toBe(false);
+    // Activating the attention's tab starts the dwell. Chrome then activates a neighbor in a background window (a tab
+    // closed there) and a tab moves between two other windows: the dwell continues and ends exactly 5 s after the switch.
+    active = [{ id: 4, windowId: 1, active: true }]; api.tabs.onActivated.emit({ tabId: 4, windowId: 1 }); await vi.advanceTimersByTimeAsync(2000);
+    const before = asked();
+    api.tabs.onActivated.emit({ tabId: 9, windowId: 7 }); api.tabs.onDetached.emit(12, { oldWindowId: 7, oldPosition: 0 }); api.tabs.onAttached.emit(12, { newWindowId: 8, newPosition: 0 });
+    await vi.advanceTimersByTimeAsync(2999); expect((await attention()).acknowledged).toBe(false); expect(asked()).toBe(before);
+    await vi.advanceTimersByTimeAsync(1); expect((await attention()).acknowledged).toBe(true); expect(asked()).toBe(before + 1);
+    // A new attention raised on the viewed tab dwells from its raise; switching away stops it by the event alone, so no
+    // deadline query follows.
+    await sample('error_visible'); await vi.advanceTimersByTimeAsync(2000);
+    active = [{ id: 9, windowId: 1, active: true }]; api.tabs.onActivated.emit({ tabId: 9, windowId: 1 }); await vi.advanceTimersByTimeAsync(0);
+    const switched = asked(); await vi.advanceTimersByTimeAsync(10_000);
+    expect(asked()).toBe(switched); expect(await attention()).toMatchObject({ reason: 'error_visible', acknowledged: false });
+    // The attention's tab moves to background window 2 (a new attention identity there): not viewed.
+    tab = { ...tab, windowId: 2, index: 0 }; active = [{ id: 9, windowId: 1, active: true }, { id: 4, windowId: 2, active: true }];
+    api.tabs.onDetached.emit(4, { oldWindowId: 1, oldPosition: 2 }); api.tabs.onAttached.emit(4, { newWindowId: 2, newPosition: 0 });
+    await vi.advanceTimersByTimeAsync(10_000); expect(await attention()).toMatchObject({ reason: 'error_visible', acknowledged: false });
+    // Dragged back into the focused window, where it becomes the active tab: the attach event alone says it is viewed now.
+    tab = { ...tab, windowId: 1, index: 3 }; active = [{ id: 4, windowId: 1, active: true }];
+    api.tabs.onDetached.emit(4, { oldWindowId: 2, oldPosition: 0 }); api.tabs.onAttached.emit(4, { newWindowId: 1, newPosition: 3 });
+    await vi.advanceTimersByTimeAsync(1100); expect(await attention()).toMatchObject({ reason: 'error_visible', acknowledged: false });
+    await vi.advanceTimersByTimeAsync(3800); expect((await attention()).acknowledged).toBe(false);
+    await vi.advanceTimersByTimeAsync(1300); expect((await attention()).acknowledged).toBe(true);
+    expect(JSON.stringify(api.tabs.query.mock.calls.filter(([query]: any[]) => query.active))).not.toMatch(/url|title|private/i);
+  });
+  it('reads the automatic seen delay at startup and keeps the ordered settings guard for it', async () => {
+    await rpc({ method: 'updateSettings', patch: { autoAcknowledgeSeconds: 15 } });
+    for (const area of [api.runtime, api.permissions, api.tabs, api.windows, api.commands, api.alarms, api.action]) for (const key of Object.keys(area)) if (/^on[A-Z]/.test(key)) area[key] = signal();
+    const activationId = crypto.randomUUID(), tab = { id: 4, windowId: 1, url: 'https://claude.ai/chat/private', status: 'complete' };
+    api.tabs.get.mockResolvedValue(tab);
+    api.tabs.query.mockImplementation(async (query: any) => query.active ? [{ id: 4, windowId: 1, active: true }] : [tab]);
+    api.windows.getLastFocused.mockResolvedValue({ id: 1, focused: true });
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence: 'input_required' } }] : []);
+    vi.resetModules(); await import('../../src/background/index'); expect((await rpc({ method: 'getSnapshot' })).data.settings.autoAcknowledgeSeconds).toBe(15);
+    const { HubRepository } = await import('../../src/domain/repository');
+    // The restarted worker knows the delay before any settings call: the attention raised on the viewed tab dwells 15 s.
+    api.tabs.onUpdated.emit(4, { status: 'complete' }, tab); await vi.advanceTimersByTimeAsync(1100);
+    const attention = async () => (await rpc({ method: 'getWebActivity' })).data.observations[0].attention;
+    expect((await attention()).acknowledged).toBe(false);
+    await vi.advanceTimersByTimeAsync(13_800); expect((await attention()).acknowledged).toBe(false);
+    await vi.advanceTimersByTimeAsync(200); expect((await attention()).acknowledged).toBe(true);
+    // Two calls whose replies arrive in reverse order: the older one cannot restore its delay over the newer one.
+    api.tabs.onUpdated.emit(4, { status: 'complete' }, tab);
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence: 'error_visible' } }] : []);
+    await vi.advanceTimersByTimeAsync(1100);
+    const settings = (await rpc({ method: 'getSnapshot' })).data.settings, replies: ((value: unknown) => void)[] = [];
+    const spy = vi.spyOn(HubRepository.prototype, 'updateSettings').mockImplementation(() => new Promise(resolve => { replies.push(resolve); }) as never);
+    const older = rpc({ method: 'updateSettings', patch: { autoAcknowledgeSeconds: 5 } }), newer = rpc({ method: 'updateSettings', patch: { autoAcknowledgeSeconds: 0 } });
+    await vi.waitFor(() => expect(replies).toHaveLength(2));
+    replies[1]({ ...settings, autoAcknowledgeSeconds: 0 }); expect((await newer).ok).toBe(true);
+    replies[0]({ ...settings, autoAcknowledgeSeconds: 5 }); expect((await older).ok).toBe(true);
+    await vi.advanceTimersByTimeAsync(30_000); expect(await attention()).toMatchObject({ reason: 'error_visible', acknowledged: false });
+    spy.mockRestore();
   });
   it('permits fixed provider opening after denial and refuses removed generic tab capability', async () => {
     api.permissions.contains.mockResolvedValue(false); expect((await rpc({ method: 'openWebProvider', provider: 'chatgpt-web' })).ok).toBe(true); expect(api.tabs.create).toHaveBeenCalledWith({ url: 'https://chatgpt.com/', active: true });

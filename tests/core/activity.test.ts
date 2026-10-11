@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WebActivity, type ActivityAccess } from '../../src/background/activity';
+import { WebActivity, type ActivityAccess, type ActivityView } from '../../src/background/activity';
 import { makeUnknown, newActivityRecord, reduceActivity } from '../../src/background/activity-reducer';
 import { BADGE_COLORS, BADGE_TEXT_COLOR } from '../../src/background/activity-badge';
 import { activityHintSchema, activitySampleSchema, ACTIVITY_TTL, type ActivityEvidence, type ActivityLease } from '../../src/shared/activity';
@@ -96,6 +96,7 @@ beforeEach(() => {
     register: vi.fn(async () => undefined), unregister: vi.fn(async () => undefined), install: vi.fn(async () => undefined), dispose: vi.fn(async () => undefined),
     sample: vi.fn(async (_tab, lease) => [{ frameId: 0, documentId, result: { version: 1, requestId: lease.requestId, activationId, evidence } }]),
     focus: vi.fn(async (_provider, _tabId, current) => { if (!current()) throw new Error('expired'); }), badge: vi.fn(async () => undefined), notify: vi.fn(),
+    viewing: vi.fn(async () => undefined),
   };
   activity = new WebActivity(access);
 });
@@ -661,5 +662,156 @@ describe('stable session identity: numbers, positions and labels', () => {
     activity.invalidateTab(2, true); urls.delete(2); await open(4, gpt(4));
     expect(byTab(4)).toMatchObject({ sessionNumber: 2 }); expect(byTab(4)).not.toHaveProperty('label');
     expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|Plus tard|PRIVATE_LABEL/);
+  });
+});
+
+describe('optional automatic seen after dwelling on the tab', () => {
+  const evidenceFor = new Map<number, ActivityEvidence>(), documents = new Map<number, string>(), activations = new Map<number, string>();
+  const tabOf = (id: number) => ({ id, windowId: 2, url: `https://chatgpt.com/c/PRIVATE_URL_CANARY_${id}`, status: 'complete' });
+  const byTab = (tabId: number) => activity.snapshot().observations.find(observation => observation.tabId === tabId);
+  const seen = (tabId: number) => byTab(tabId)?.attention?.acknowledged;
+  const asked = () => vi.mocked(access.viewing).mock.calls.length;
+  // What Chrome answers when asked for the active tab of its focused window. Its events only make the worker ask again.
+  let view: ActivityView | undefined;
+  const look = async (tabId?: number, windowId = 2) => { view = tabId === undefined ? undefined : { tabId, windowId }; activity.viewChanged(); await tick(); };
+  const raise = async (tabId: number, value: ActivityEvidence) => { evidenceFor.set(tabId, value); activity.updateTab(tabId, {}, tabOf(tabId)); await tick(1000); };
+  // Heartbeats: samples of unchanged evidence keep the same attention identity live, and so do not restart a dwell.
+  const keep = async (ms: number, tabIds = [1, 2]) => { const end = now + ms; while (now < end) { for (const id of tabIds) activity.updateTab(id, {}, tabOf(id)); await tick(Math.min(1000, end - now)); } };
+  beforeEach(() => {
+    view = undefined;
+    for (const id of [1, 2]) { evidenceFor.set(id, 'working'); documents.set(id, `document-${id}`); activations.set(id, crypto.randomUUID()); }
+    vi.mocked(access.tabs).mockImplementation(async () => [1, 2].map(tabOf));
+    vi.mocked(access.tab).mockImplementation(async id => tabOf(id));
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: evidenceFor.get(tabId)! } }]);
+    vi.mocked(access.viewing).mockImplementation(async () => view && { ...view });
+  });
+  it('is off by default and for any unexpected value: Chrome is never asked and nothing is acknowledged', async () => {
+    activity.start(); await tick(); await raise(1, 'input_required'); await look(1);
+    for (const value of [10, -1, '5', 5.5, null, undefined, true, [5]]) activity.setAutoAcknowledge(value);
+    await keep(60_000); await look(1);
+    expect(seen(1)).toBe(false); expect(asked()).toBe(0); expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.input_required });
+  });
+  it('acknowledges only the viewed attention after exactly N continuous seconds, through the seen path, and repaints the badge', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'error_visible');
+    expect(painted()).toMatchObject({ text: '2', background: BADGE_COLORS.error_visible });
+    const attention = byTab(1)!.attention!, other = byTab(2)!.attention!, acknowledge = vi.spyOn(activity, 'acknowledge');
+    await look(1); await keep(4999); expect(seen(1)).toBe(false); expect(acknowledge).not.toHaveBeenCalled();
+    vi.mocked(access.notify).mockClear(); const before = asked();
+    await tick(1);
+    expect(byTab(1)!.attention).toEqual({ ...attention, acknowledged: true }); expect(acknowledge).toHaveBeenCalledExactlyOnceWith(byTab(1)!.id, attention.id);
+    // Chrome was asked again at the deadline. The other tab's attention is untouched and the badge lowers to it.
+    expect(asked()).toBe(before + 1); expect(byTab(2)!.attention).toEqual(other);
+    expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.error_visible, title: 'Pilovo — 1 à vérifier (erreur visible)' }); expect(access.notify).toHaveBeenCalled();
+    await keep(30_000); expect(acknowledge).toHaveBeenCalledOnce(); expect(seen(2)).toBe(false); expect(access.focus).not.toHaveBeenCalled();
+    expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|documentId|activationId/);
+  });
+  it('starts the dwell when attention is raised on a tab already viewed', async () => {
+    activity.setAutoAcknowledge(15); activity.start(); await tick(); await look(1);
+    // Work while viewed: nothing to acknowledge, so no deadline is asked about.
+    await keep(10_000); const before = asked();
+    await raise(1, 'input_required'); const raisedAt = byTab(1)!.attention!.raisedAt; expect(raisedAt).toBe(now);
+    await keep(14_999); expect(seen(1)).toBe(false); expect(asked()).toBe(before);
+    await tick(1); expect(seen(1)).toBe(true); expect(now - raisedAt).toBe(15_000);
+  });
+  it('stops on a tab switch, a window blur, WINDOW_ID_NONE or another focused window; coming back restarts it in full', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required');
+    await look(1); await keep(3000);
+    await look(2); await keep(3000); expect(seen(1)).toBe(false);
+    await look(1); await keep(4999); expect(seen(1)).toBe(false);
+    // Chrome lost focus (another application): the event alone stops the dwell, without asking Chrome.
+    const before = asked(); activity.viewChanged(-1); await keep(10_000); expect(seen(1)).toBe(false); expect(asked()).toBe(before);
+    // Focus moves to another window, whose active tab Chrome then reports.
+    view = { tabId: 7, windowId: 5 }; activity.viewChanged(5); await keep(10_000); expect(seen(1)).toBe(false); expect(asked()).toBe(before + 1);
+    await look(1); await keep(3000);
+    // A blur with no focused window answered later by Chrome: the tab still active but no window focused.
+    view = undefined; activity.viewChanged(1); await keep(10_000); expect(seen(1)).toBe(false);
+    view = { tabId: 1, windowId: 2 }; activity.viewChanged(2); await keep(4999); expect(seen(1)).toBe(false);
+    await tick(1); expect(seen(1)).toBe(true);
+  });
+  it('keeps a dwell through tab events in other windows; one in the viewed window or on the viewed tab restarts it', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required');
+    await look(1); await keep(1000); const before = asked();
+    // Chrome activates a neighbor in a background window (a tab closed there); a tab moves between two other windows.
+    activity.tabViewChanged(9, 7); await keep(1000); activity.tabViewChanged(10, 7); activity.tabViewChanged(10, 8); await keep(2000);
+    // Neither stopped it nor asked Chrome again: exactly 5 s after viewing began, the deadline query alone confirms it.
+    expect(asked()).toBe(before); await keep(999); expect(seen(1)).toBe(false);
+    await tick(1); expect(seen(1)).toBe(true); expect(asked()).toBe(before + 1);
+    // A new attention: an activation in the viewed window, or an event moving the viewed tab, stops the dwell at once.
+    for (const [tabId, windowId, reason] of [[2, 2, 'error_visible'], [1, 7, 'input_required']] as const) {
+      await raise(1, reason); await keep(2000);
+      const asking = asked(); activity.tabViewChanged(tabId, windowId); await tick(); expect(asked()).toBe(asking + 1);
+      await keep(4999); expect(seen(1)).toBe(false); await tick(1); expect(seen(1)).toBe(true);
+    }
+  });
+  it('never acknowledges while the panel or full page has focus beside another tab, or the tab sits in another window', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    // The full-page Pilovo tab (not observed) is the active tab of the focused window.
+    await look(99); await keep(10_000);
+    // The reported window is not the observed tab's window: the tab moved and no sample or position read confirms it yet.
+    await look(1, 8); await keep(10_000);
+    expect([seen(1), seen(2)]).toEqual([false, false]);
+  });
+  it('stops on navigation; the new attention raised in the still viewed tab gets its own full dwell', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required');
+    const first = byTab(1)!.attention!; await look(1); await keep(3000);
+    activity.updateTab(1, { url: `${tabOf(1).url}/next` }, tabOf(1)); expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'navigation' });
+    await tick(1000); const second = byTab(1)!.attention!; expect(second).toMatchObject({ raisedAt: now, acknowledged: false }); expect(second.id).not.toBe(first.id);
+    // The first deadline (2 s after navigation) passes without acknowledging anything.
+    await keep(4999); expect(seen(1)).toBe(false);
+    await tick(1); expect(byTab(1)!.attention).toEqual({ ...second, acknowledged: true });
+  });
+  it('replaces the dwell when a new attention identity is raised: the old deadline passes, the new one is N s after its raise', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required');
+    const acknowledge = vi.spyOn(activity, 'acknowledge');
+    await look(1); await keep(2000); await raise(1, 'error_visible');
+    const replaced = byTab(1)!.attention!; expect(replaced.reason).toBe('error_visible');
+    await keep(2000); expect(seen(1)).toBe(false); expect(acknowledge).not.toHaveBeenCalled();
+    await keep(2999); expect(seen(1)).toBe(false);
+    await tick(1); expect(acknowledge).toHaveBeenCalledExactlyOnceWith(byTab(1)!.id, replaced.id); expect(byTab(1)!.attention).toEqual({ ...replaced, acknowledged: true });
+  });
+  it.each(['closure', 'revocation', 'manual seen', 'mark all', 'expiry'] as const)('stops on %s and acknowledges nothing at the deadline', async change => {
+    activity.setAutoAcknowledge(change === 'expiry' ? 30 : 5); activity.start(); await tick(); await raise(1, 'input_required');
+    await look(1); await keep(3000); const before = asked();
+    const acknowledge = vi.spyOn(activity, 'acknowledge');
+    if (change === 'closure') activity.invalidateTab(1, true);
+    else if (change === 'revocation') activity.revoke('chatgpt-web');
+    else if (change === 'manual seen') activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id);
+    else if (change === 'mark all') activity.acknowledgeAll();
+    // Expiry: no heartbeat renews the evidence, which lapses 15 s after the last sample, before the 30 s deadline.
+    await (change === 'expiry' || change === 'closure' || change === 'revocation' ? tick(40_000) : keep(40_000));
+    expect(acknowledge).toHaveBeenCalledTimes(change === 'manual seen' ? 1 : 0); expect(asked()).toBe(before);
+    if (change === 'manual seen' || change === 'mark all') expect(seen(1)).toBe(true);
+    else if (change === 'expiry') expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
+    else expect(byTab(1)).toBeUndefined();
+  });
+  it('requires evidence still live at the deadline: a deadline exactly at validUntil acknowledges nothing', async () => {
+    activity.setAutoAcknowledge(15); activity.start(); await tick(); await raise(1, 'input_required');
+    await look(1); expect(byTab(1)!.validUntil).toBe(now + 15_000);
+    await tick(15_000); expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' }); expect(byTab(1)!.attention).toBeUndefined();
+  });
+  it('re-verifies from a fresh query at the deadline: a stale cached view, a lost focus or a failed query acknowledges nothing', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required');
+    // The user left for tab 2 but that event has not reached the worker: only the deadline query sees it.
+    await look(1); view = { tabId: 2, windowId: 2 }; await keep(10_000); expect(seen(1)).toBe(false);
+    // Chrome no longer has a focused window, and its blur event was missed.
+    await look(1); view = undefined; await keep(10_000); expect(seen(1)).toBe(false);
+    // Chrome cannot answer: nothing is acknowledged and no rejection escapes.
+    await look(1); vi.mocked(access.viewing).mockRejectedValueOnce(new Error('No current window')); await keep(10_000); expect(seen(1)).toBe(false);
+    // A view event while the deadline query is pending wins over its answer.
+    const slow = deferred<ActivityView | undefined>(); await look(1); vi.mocked(access.viewing).mockReturnValueOnce(slow.promise);
+    await keep(5000); view = { tabId: 2, windowId: 2 }; activity.viewChanged(); slow.resolve({ tabId: 1, windowId: 2 }); await keep(10_000); expect(seen(1)).toBe(false);
+    // Once Chrome answers consistently, a full dwell acknowledges it.
+    await look(1); await keep(5000); expect(seen(1)).toBe(true);
+  });
+  it('follows setting changes: 15 to 0 stops the dwell, 0 to 5 while viewing starts it from the current view', async () => {
+    activity.setAutoAcknowledge(15); activity.start(); await tick(); await raise(1, 'input_required'); await look(1);
+    await keep(10_000); activity.setAutoAcknowledge(0); const before = asked();
+    await keep(20_000); expect(seen(1)).toBe(false); expect(asked()).toBe(before);
+    // Re-enabled without any tab or window event: the worker asks Chrome what is viewed now.
+    activity.setAutoAcknowledge(5); await tick(); expect(asked()).toBe(before + 1);
+    await keep(4999); expect(seen(1)).toBe(false); await tick(1); expect(seen(1)).toBe(true);
+    // A longer delay restarts from the change for the next attention.
+    await raise(1, 'error_visible'); await keep(2000); activity.setAutoAcknowledge(30); await keep(29_999); expect(seen(1)).toBe(false);
+    await tick(1); expect(seen(1)).toBe(true);
   });
 });

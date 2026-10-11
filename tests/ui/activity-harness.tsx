@@ -106,6 +106,9 @@ Object.assign(window, { __activity: {
     if (reason) { record.state = 'attention'; record.attention = { id: `event-${id}-${reason}`, reason, acknowledged: false, raisedAt: record.stateSince }; } else if (record.attention) record.attention.raisedAt = record.stateSince;
     signal();
   },
+  // Seen outside this panel (automatic seen after dwelling on the tab, the keyboard command or another panel): the worker's
+  // state changes and the panel only learns it from the change signal.
+  seenElsewhere: (ids: string[]) => { for (const record of records) if (ids.includes(record.id) && record.attention) record.attention.acknowledged = true; signal(); },
   failAckAll: (value: boolean) => { ackAllFailure = value; },
   holdAckAll: (value: boolean) => { holdAckAll = value; }, resolveAckAll: () => pendingAckAll?.(),
   shortcut: (value: string | null) => { shortcuts = value === null ? {} : { 'focus-next-attention': value }; signal(); },
@@ -116,5 +119,7 @@ Object.assign(window, { __activity: {
   settle: () => { for (const record of records) if (record.state === 'working' || record.state === 'attention') { record.state = 'idle'; delete record.attention; } signal(); },
   timers: () => [...timers.values()],
   unmount: () => root.unmount(), settings: (patch: Parameters<HubClient['updateSettings']>[0]) => api.updateSettings(patch),
+  // Saved preferences as the worker would read them (the harness has no worker: automatic seen itself is unit-tested).
+  savedSettings: () => structuredClone(snapshot.settings),
 } });
 root.render(<App api={api} />);

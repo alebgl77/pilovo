@@ -32,6 +32,11 @@ export const activityShortcutsSchema = z.array(z.object({ name: z.string().max(6
 export const ACTIVITY_LABEL_MAX = 40;
 const unsafeLabel = /[\p{Cc}\u202A-\u202E\u2066-\u2069]/u;
 export const activityLabelSchema = z.string().trim().min(1).max(ACTIVITY_LABEL_MAX).refine(value => !unsafeLabel.test(value));
+// Optional automatic seen: seconds an attention's tab must stay the active tab of Chrome's focused window before the
+// worker acknowledges that attention locally. 0, the default, turns it off. Seen is never verification or approval.
+export const AUTO_ACKNOWLEDGE_SECONDS = [0, 5, 15, 30] as const;
+export type AutoAcknowledgeSeconds = typeof AUTO_ACKNOWLEDGE_SECONDS[number];
+export const autoAcknowledgeSchema = z.literal(AUTO_ACKNOWLEDGE_SECONDS);
 export interface WebActivitySnapshot {
   availability: 'available' | 'unavailable'; observations: WebActivityObservation[]; observedAt: number;
 }

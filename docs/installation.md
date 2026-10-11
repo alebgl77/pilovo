@@ -33,6 +33,12 @@ These shortcuts are unreleased: they are available when you build from source, n
 
 To assign, change or remove a shortcut, open `chrome://extensions/shortcuts`, find Pilovo and edit its field. Chrome may leave the suggested `Alt+Shift+J` unassigned, for example when another extension already uses it; the panel then hides its shortcut hint until you assign one. Shortcuts are Chrome commands, not permissions, and grant no site access.
 
+## Automatic seen
+
+This setting is unreleased: it is available when you build from source, not in the 0.4.0 archive. It is off by default.
+
+In **Settings**, under **Activity**, **Mark as seen automatically** offers **Off**, **5 s**, **15 s** and **30 s**. When set, an item to review is marked as seen after its own tab has stayed the active tab of the focused Chrome window for that delay, with or without the side panel open beside it. Pilovo's full-page view, another tab or window, or another application in front does not count. A tab or window switch, leaving Chrome, navigation, closing the tab, removing that site's access, a new signal in the tab or a manual acknowledgment stops the wait; it restarts in full when the tab is in front again, and Pilovo asks Chrome again just before marking. The activity page's footer then states the delay. Seen means you noticed the item, not that the task succeeded; it approves and verifies nothing. Only tab and window IDs and their active and focused flags are read, in memory; no permission is added.
+
 ## Build from source
 
 From the clone or Source ZIP root, use Node.js 22.12+:
@@ -63,5 +69,6 @@ Uninstall removes extension storage. Exports, backups, clipboard, provider conve
 8. Sessions (non publiées, depuis les sources) : chaque ligne garde un numéro stable par service et indique la position de l'onglet (« Onglet 4 », avec « autre fenêtre » s'il est ailleurs). Le bouton crayon **Nommer cette session** permet de lui donner un nom tant que sa preuve est à jour ; ce nom reste en mémoire, affiché lorsque l'onglet est sur le service où il a été donné, jusqu'à la fermeture de l'onglet, au retrait de l'accès à ce site ou au redémarrage du service worker, sans être stocké ni exporté.
 9. Badge (non publié, depuis les sources) : rouge pour une erreur visible, brun ambré pour une intervention demandée, olive pour une réponse disponible ; « … » signale un travail observé quand rien n'est à vérifier. Au survol de l'icône, un résumé en texte, dans la langue des paramètres de Pilovo, reprend ces nombres.
 10. Raccourcis (non publiés, depuis les sources) : `Alt+Maj+J` rejoint le prochain élément à vérifier, ou ouvre le panneau s'il n'y a rien à vérifier. Pour le modifier, ou attribuer une touche à **Marquer tous les éléments à vérifier comme vus**, ouvrez `chrome://extensions/shortcuts`.
+11. « Vu » automatique (non publié, depuis les sources ; désactivé par défaut) : dans **Paramètres**, rubrique **Activité**, **Marquer comme vu automatiquement** propose **Désactivé**, **5 s**, **15 s** et **30 s**. Un élément à vérifier est alors marqué comme vu après ce délai passé sur son propre onglet, onglet actif de la fenêtre Chrome active, avec ou sans le panneau latéral ouvert à côté ; la vue complète de Pilovo, un autre onglet, une autre fenêtre ou une autre application ne comptent pas. Changer d'onglet ou de fenêtre, quitter Chrome, naviguer, fermer l'onglet, retirer l'accès au site, un nouveau signal ou un « Vu » manuel interrompt l'attente, qui repart de zéro au retour sur l'onglet. « Vu » signifie que vous l'avez remarqué, pas que la tâche a réussi. Seuls les identifiants d'onglets et de fenêtres et leurs indicateurs « actif » et « active » sont lus, en mémoire ; aucune permission n'est ajoutée.
 
 Le cœur de Pilovo est gratuit. Aucun compte Pilovo, clé API ou compagnon à installer. Le Chrome Web Store serait un parcours futur plus simple, sous réserve d'une soumission acceptée ; ce pilote s'installe manuellement.

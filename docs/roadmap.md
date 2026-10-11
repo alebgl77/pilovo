@@ -8,6 +8,7 @@ Proposed work, not a delivery commitment. The [activity PRD](activity-manager-pr
 | Per-site grants, local isolated observer | Exact-artifact real permission grant/denial/revocation checks |
 | Freshness/unknown, focus and seen acknowledgment | Longer suspended/background-tab and multiple-window testing |
 | Unreleased: next-attention keyboard shortcut and local mark all as seen | Manual real-key checks across platforms and with conflicting extension shortcuts |
+| Unreleased: optional automatic seen after dwelling on the tab, off by default | Check OS focus reporting across platforms, window managers and multiple monitors |
 | Unreleased: ephemeral working/attention elapsed durations | Check against real provider sessions how often throttling or lost evidence restarts them |
 | Unreleased: stable session numbers, tab position and ephemeral session names | Check numbering and positions with many tabs, several windows and tab groups; review the rename field with screen readers |
 | Last-observed toolbar attention badge | Measure MV3 watchdog delays; no strict real-time guarantee |

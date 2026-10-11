@@ -2,6 +2,7 @@
 import { createRoot } from 'react-dom/client';
 import { App } from '../../src/ui/App';
 import { client } from '../../src/platform/client';
+import { DEFAULT_SETTINGS } from '../../src/shared/defaults';
 import type { AgentEvent, HubClient, Mission, Snapshot, TaskRun } from '../../src/shared/types';
 import '../../src/ui/styles.css';
 
@@ -17,7 +18,7 @@ const api: HubClient = { ...client,
   subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
 };
 const baseTask: TaskRun = { key: 'codex:A:run', sourceId: 'codex', taskId: 'A', runId: 'run', title: 'Synthetic task A', execution: 'completed', connection: 'disconnected', lastEventAt: '2026-10-09T10:01:00Z', receivedAt: '2026-10-09T10:01:00Z', createdAt: '2026-10-09T10:00:00Z', lastSequence: 2, eventCount: 2, gaps: 0, uncertainty: false, verification: { status: 'unverified' }, review: { status: 'pending' }, artifacts: [], associationHistory: [], verificationChecks: [], provenance: { status: 'agent_reported', metadata: 'agent_reported', connection: 'hub_observed' } };
-const snapshot = (title: string): Snapshot => ({ mode: 'preview', bridgeStatus: 'disabled', connectors: [], diagnostics: { acceptedEvents: 0, duplicateEvents: 0, rejectedEvents: 0 }, settings: { language: 'fr', theme: 'light', retentionDays: 30, retainPrompts: false, notifications: false, bridgeEnabled: false }, missions: [{ id: 'mission', title, createdAt: '2026-10-09T10:00:00Z', taskKeys: [] }], tasks: [baseTask, { ...baseTask, key: 'claude-code:B:run', sourceId: 'claude-code', taskId: 'B', title: 'Synthetic task B' }] });
+const snapshot = (title: string): Snapshot => ({ mode: 'preview', bridgeStatus: 'disabled', connectors: [], diagnostics: { acceptedEvents: 0, duplicateEvents: 0, rejectedEvents: 0 }, settings: { ...DEFAULT_SETTINGS, language: 'fr', theme: 'light' }, missions: [{ id: 'mission', title, createdAt: '2026-10-09T10:00:00Z', taskKeys: [] }], tasks: [baseTask, { ...baseTask, key: 'claude-code:B:run', sourceId: 'claude-code', taskId: 'B', title: 'Synthetic task B' }] });
 const root = createRoot(document.getElementById('root')!);
 root.render(<App api={api} />);
 Object.assign(window, { __hubHarness: {

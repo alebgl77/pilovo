@@ -1,4 +1,4 @@
-import { ACTIVITY_TTL, activityHintSchema, activityLabelSchema, activitySampleSchema, monotonicEpoch, type ActivityLease, type WebActivityObservation, type WebActivitySnapshot } from '../shared/activity';
+import { ACTIVITY_TTL, activityHintSchema, activityLabelSchema, activitySampleSchema, autoAcknowledgeSchema, monotonicEpoch, type ActivityLease, type AutoAcknowledgeSeconds, type WebActivityObservation, type WebActivitySnapshot } from '../shared/activity';
 import { WEB_PROVIDERS, type WebProvider } from '../shared/web';
 import { HubError } from '../shared/errors';
 import { eligibleWebTab, matchesWebProvider, type WebTab } from '../platform/web';
@@ -18,6 +18,8 @@ export interface ActivityAccess {
   dispose(tabId: number, grantId: string): Promise<void>;
   focus(provider: WebProvider, tabId: number, stillCurrent: () => boolean): Promise<void>;
   badge(badge: ActivityBadge): Promise<void>;
+  /** The active tab of Chrome's focused window, or undefined when no browser window has focus. IDs only, no page access. */
+  viewing(): Promise<ActivityView | undefined>;
   notify(): void;
   now(): number; wall(): number;
 }
@@ -31,7 +33,12 @@ interface Session { provider: WebProvider; number: number; index?: number }
 // provider and coming back, is shown only while the tab is on the provider it was given on, and ends with the tab,
 // that provider's grant or this worker. Memory only.
 interface Label { provider: WebProvider; text: string }
+// What the user is looking at: the active tab of Chrome's focused window.
+export interface ActivityView { tabId: number; windowId: number }
+// Optional automatic seen: one timer, for the viewed tab only, bound to one attention identity of one record and grant.
+interface Dwell { tabId: number; windowId: number; record: ActivityRecord; identity: string; attentionId: string; grantId: string; timer: ReturnType<typeof setTimeout> }
 const validIndex = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+const validView = (view: ActivityView | undefined): view is ActivityView => validIndex(view?.tabId) && validIndex(view?.windowId);
 
 export class WebActivity {
   private readonly workerId = crypto.randomUUID();
@@ -48,6 +55,11 @@ export class WebActivity {
   private painted?: ActivityBadge;
   private language: ActivityLanguage = 'fr';
   private available = true;
+  private autoAcknowledge: AutoAcknowledgeSeconds = 0;
+  // From the last fresh query, cleared by every tab activation or window focus event until the next query answers.
+  private view?: ActivityView;
+  private views = 0;
+  private dwelling?: Dwell;
   // The first paint of each worker life clears a badge and title left by a previous one.
   constructor(private readonly access: ActivityAccess) { this.paintBadge(); }
 
@@ -55,6 +67,29 @@ export class WebActivity {
   setLanguage(language: unknown) {
     const next = activityLanguage(language);
     if (next !== this.language) { this.language = next; this.paintBadge(); }
+  }
+
+  /** Optional automatic seen, from the app's settings: 0 (the default, also for any unexpected value) turns it off.
+   * A change restarts any dwell from the currently viewed tab. */
+  setAutoAcknowledge(seconds: unknown) {
+    const parsed = autoAcknowledgeSchema.safeParse(seconds), next = parsed.success ? parsed.data : 0;
+    if (next !== this.autoAcknowledge) { this.autoAcknowledge = next; this.viewChanged(); }
+  }
+  /** Chrome's tab activation or window focus changed (windowId < 0: WINDOW_ID_NONE, Chrome lost focus). Any dwell stops
+   * at once; while automatic seen is on, a fresh query then says which tab is viewed. Off, Chrome is never queried. */
+  viewChanged(windowId?: number) {
+    const pass = ++this.views;
+    this.view = undefined; this.dwell();
+    if (!this.autoAcknowledge || windowId !== undefined && windowId < 0) return;
+    void this.access.viewing().catch(() => undefined).then(view => { if (pass === this.views) { this.view = validView(view) ? { tabId: view.tabId, windowId: view.windowId } : undefined; this.dwell(); } });
+  }
+  /** A tab was activated, attached or detached in that window. An event that concerns neither the viewed tab nor the viewed
+   * window cannot change the focused window's active tab, so a running dwell continues (a focus change has its own event,
+   * and the deadline asks Chrome again anyway); any other event is a view change. */
+  tabViewChanged(tabId: number, windowId: number) {
+    const view = this.view;
+    if (view && validIndex(tabId) && validIndex(windowId) && tabId !== view.tabId && windowId !== view.windowId) return;
+    this.viewChanged();
   }
 
   start() { for (const provider of WEB_PROVIDERS) this.reconcile(provider.id); }
@@ -344,6 +379,41 @@ export class WebActivity {
     this.changed();
     return count;
   }
+  // The user is looking at this attention: unacknowledged, live and current for its grant, on the viewed tab of the
+  // focused window. A dwell runs only while this holds for the same record identity and attention identity.
+  private watched(dwell: Omit<Dwell, 'timer'>, view: ActivityView | undefined) {
+    const { tabId, windowId, record, identity, attentionId, grantId } = dwell, observation = record.observation, grant = this.grants.get(observation.provider)!;
+    return this.autoAcknowledge > 0 && view?.tabId === tabId && view.windowId === windowId && observation.windowId === windowId && this.records.get(tabId) === record && record.identity === identity
+      && observation.state === 'attention' && observation.attention?.id === attentionId && !observation.attention.acknowledged && observation.validUntil > this.access.now()
+      && grant.enabled && grant.id === grantId;
+  }
+  // Runs on every change and view answer: stops a dwell that no longer holds (tab switch, blur, navigation, closure,
+  // a new attention identity, acknowledgment, expiry, revocation, setting off) and starts one when the viewed tab shows an
+  // eligible attention, either when it becomes viewed or when it is raised there. Timers live in this worker only.
+  private dwell() {
+    if (this.dwelling && !this.watched(this.dwelling, this.view)) { clearTimeout(this.dwelling.timer); this.dwelling = undefined; }
+    const view = this.view, record = view && this.records.get(view.tabId), attention = record?.observation.attention;
+    if (this.dwelling || !view || !record || !attention) return;
+    const candidate = { tabId: view.tabId, windowId: view.windowId, record, identity: record.identity, attentionId: attention.id, grantId: this.grants.get(record.observation.provider)!.id };
+    if (!this.watched(candidate, view)) return;
+    const dwell: Dwell = { ...candidate, timer: setTimeout(() => { void this.dwelled(dwell); }, this.autoAcknowledge * 1_000) };
+    this.dwelling = dwell;
+  }
+  // At the deadline, Chrome is asked again: cached events can be stale or missing. Every condition is then re-checked in
+  // one synchronous step before acknowledging exactly that attention identity through the ordinary seen path.
+  private async dwelled(dwell: Dwell) {
+    if (this.dwelling !== dwell) return;
+    const fresh = await this.access.viewing().catch(() => undefined);
+    // Any view event or change that stopped this dwell meanwhile wins over the answer.
+    if (this.dwelling !== dwell) return;
+    this.dwelling = undefined;
+    const view = validView(fresh) ? { tabId: fresh.tabId, windowId: fresh.windowId } : undefined;
+    if (this.watched(dwell, this.view) && this.watched(dwell, view)) {
+      try { this.acknowledge(dwell.record.observation.id, dwell.attentionId); return; } catch { /* Expired meanwhile: nothing is acknowledged. */ }
+    }
+    // The fresh answer replaces the cached view: a dwell restarts only from what Chrome reports now.
+    this.view = view; this.dwell();
+  }
   expire() {
     let changed = false;
     for (const record of this.records.values()) if (record.observation.validUntil <= this.access.now() && record.observation.unknownReason !== 'expired' && record.observation.unknownReason !== 'navigation') { makeUnknown(record, 'expired', this.access.now()); changed = true; }
@@ -357,7 +427,7 @@ export class WebActivity {
     this.painted = badge;
     this.badgeQueue = this.badgeQueue.catch(() => undefined).then(() => this.access.badge(badge)).catch(() => { if (this.painted === badge) this.painted = undefined; });
   }
-  private changed() { this.paintBadge(); this.access.notify(); this.arm(); }
+  private changed() { this.paintBadge(); this.access.notify(); this.arm(); this.dwell(); }
   // The clock is fractional and setTimeout truncates its delay, so the watchdog rounds up past the earliest validUntil.
   private arm() {
     clearTimeout(this.expiry);
@@ -375,6 +445,13 @@ export function chromeActivityAccess(focus: ActivityAccess['focus'], notify: () 
     runtimeId: chrome.runtime.id, now: monotonicEpoch, wall: Date.now, focus, notify,
     hasPermission: provider => chrome.permissions.contains({ origins: [providerInfo(provider).pattern] }),
     tabs: provider => chrome.tabs.query({ url: [providerInfo(provider).pattern] }), tab: id => chrome.tabs.get(id),
+    // Without the tabs permission: only the window's id and focused flag and the tab's id, window and active flag are read.
+    viewing: async () => {
+      const window = await chrome.windows.getLastFocused();
+      if (!window.focused || !validIndex(window.id)) return undefined;
+      const [tab] = await chrome.tabs.query({ active: true, windowId: window.id });
+      return tab?.active && validIndex(tab.id) && tab.windowId === window.id ? { tabId: tab.id, windowId: window.id } : undefined;
+    },
     register: provider => chrome.scripting.registerContentScripts([{ id: registration(provider), js: ['observer.js'], matches: [providerInfo(provider).pattern], allFrames: false, runAt: 'document_idle', world: 'ISOLATED', persistAcrossSessions: false }]),
     unregister: async provider => { await chrome.scripting.unregisterContentScripts({ ids: [registration(provider)] }); },
     install: async tabId => { await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', files: ['observer.js'] }); },

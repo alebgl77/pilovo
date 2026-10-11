@@ -92,6 +92,41 @@ try {
   await expect.poll(() => ui.evaluate(() => chrome.action.getTitle({}))).toBe('Pilovo');
   record('focus revalidates ephemeral row and acknowledgement clears its badge');
 
+  // Optional automatic seen, read through the real Chrome window and tab APIs (no tabs permission): off by default; on,
+  // an attention on the active tab of the focused window is seen after the delay, never one behind the extension page.
+  const complete = async () => {
+    await provider.evaluate(() => document.querySelector('form button').setAttribute('aria-label', 'Arrêter'));
+    await expect.poll(states).toEqual(['working']);
+    // A new completion: the announcer's text node is replaced, as the provider does when a newer answer ends.
+    await provider.evaluate(() => { document.querySelector('form button').setAttribute('aria-label', 'Démarrer une conversation vocale'); document.querySelector('span[role="status"]').textContent = 'Réponse terminée'; });
+    await expect.poll(states).toEqual(['attention']);
+  };
+  const seenNow = async () => (await activity()).observations[0]?.attention?.acknowledged;
+  assert.equal((await rpc(ui, { method: 'getSnapshot' })).settings.autoAcknowledgeSeconds, 0);
+  assert.equal((await rpcResult(ui, { method: 'updateSettings', patch: { autoAcknowledgeSeconds: 10 } })).ok, false);
+  await provider.bringToFront(); await complete();
+  await new Promise(resolve => setTimeout(resolve, 6500)); assert.equal(await seenNow(), false);
+  assert.equal((await rpc(ui, { method: 'updateSettings', patch: { autoAcknowledgeSeconds: 5 } })).autoAcknowledgeSeconds, 5);
+  const enabled = Date.now();
+  await expect.poll(seenNow, { timeout: 12000, intervals: [250] }).toBe(true);
+  assert.ok(Date.now() - enabled >= 4500, `seen after ${Date.now() - enabled} ms`);
+  await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  await ui.bringToFront(); await complete();
+  await new Promise(resolve => setTimeout(resolve, 7000)); assert.equal(await seenNow(), false);
+  assert.equal(await ui.evaluate(() => chrome.action.getBadgeText({})), '1');
+  // Switching to the provider tab (a real tab activation) starts the dwell: seen after the delay, counted from the switch.
+  await provider.bringToFront(); const switched = Date.now();
+  await expect.poll(seenNow, { timeout: 12000, intervals: [250] }).toBe(true);
+  assert.ok(Date.now() - switched >= 4500, `seen ${Date.now() - switched} ms after the switch`);
+  await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  // Off again: a new attention on the viewed tab stays to review until seen by hand.
+  assert.equal((await rpc(ui, { method: 'updateSettings', patch: { autoAcknowledgeSeconds: 0 } })).autoAcknowledgeSeconds, 0);
+  await complete(); await new Promise(resolve => setTimeout(resolve, 6500)); assert.equal(await seenNow(), false);
+  const pendingSeen = (await activity()).observations[0];
+  await rpc(ui, { method: 'acknowledgeWebActivity', id: pendingSeen.id, attentionId: pendingSeen.attention.id });
+  await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  record('optional automatic seen: off by default, then after the delay on the active tab of the focused window only');
+
   await provider.evaluate(() => document.querySelector('form button').setAttribute('aria-label', 'Arrêter'));
   await expect.poll(states).toEqual(['working']);
   await provider.evaluate(() => document.querySelector('form button').setAttribute('aria-label', 'Démarrer une conversation vocale'));

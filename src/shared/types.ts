@@ -1,7 +1,7 @@
 import type { BrowserActivity, ControlRequest, ControlResponse } from './launch';
 import type { AgentDetection } from './discovery';
 import type { WebDiscovery, WebPreparation, WebPreparationInput, WebPreparationPatch, WebProvider } from './web';
-import type { ActivityShortcuts, WebActivitySnapshot } from './activity';
+import type { ActivityShortcuts, AutoAcknowledgeSeconds, WebActivitySnapshot } from './activity';
 export type SourceId = 'claude-code' | 'codex';
 export type Execution = 'running' | 'waiting_input' | 'paused' | 'completed' | 'failed' | 'cancelled';
 export type Connection = 'online' | 'stale' | 'disconnected';
@@ -32,7 +32,8 @@ export interface TaskRun {
   associationHistory: { from?: string; to?: string; at: string }[];
   verificationChecks: VerificationCheck[];
 }
-export interface Settings { language: 'fr' | 'en'; theme: 'system' | 'light' | 'dark'; retentionDays: number; retainPrompts: boolean; notifications: boolean; bridgeEnabled: boolean }
+// autoAcknowledgeSeconds: optional automatic seen after dwelling on the tab, 0 (off) by default; older stored settings lack it.
+export interface Settings { language: 'fr' | 'en'; theme: 'system' | 'light' | 'dark'; retentionDays: number; retainPrompts: boolean; notifications: boolean; bridgeEnabled: boolean; autoAcknowledgeSeconds: AutoAcknowledgeSeconds }
 export interface Connector {
   id: SourceId; name: string; connection: Connection; maturity: 'proof-of-concept'; protocolVersion: 1;
   adapterVersion: string; testedVersion: string | null; lastVerifiedAt: string | null; lastSeenAt?: string;
