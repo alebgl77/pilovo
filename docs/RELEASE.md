@@ -29,7 +29,7 @@ ZIP paths are sorted, timestamps fixed and content CRC checked by regression tes
 
 ## Publication boundaries
 
-`check:publication` scans the source allowlist, common secret signatures and local Markdown links. `--staged` scans staged bytes; `--tracked` checks every tracked index path, including forced additions. CI uses tracked mode. These checks are not a complete secret audit: review images and the staged diff separately.
+`check:publication` scans the source allowlist, common secret signatures, raw bidirectional control characters (which must be written as escapes) and local Markdown links. `--staged` scans staged bytes; `--tracked` checks every tracked index path, including forced additions. CI uses tracked mode. These checks are not a complete secret audit: review images and the staged diff separately.
 
 `package:check` aligns package/lock/manifest versions; requires exact storage/sidePanel/alarms/scripting permissions and two optional hosts; rejects required hosts, static content scripts and external messaging; enforces local-only extension CSP. It requires the self-contained isolated `observer.js` and allows only reviewed runtime paths plus built JS/CSS assets. No extra executable, profile or marketing file is accepted in the Chrome bundle.
 

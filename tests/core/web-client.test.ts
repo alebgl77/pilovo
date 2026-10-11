@@ -57,8 +57,20 @@ describe('standalone extension client capability boundary', () => {
     const ids = [crypto.randomUUID(), crypto.randomUUID()];
     expect(await client.acknowledgeAllWebActivity!(ids)).toBe(2); expect(sendMessage).toHaveBeenCalledExactlyOnceWith({ channel: 'hub.rpc', request: { method: 'acknowledgeAllWebActivity', attentionIds: ids } });
   });
-  it('keeps mark all and shortcuts unavailable in the browser preview', async () => {
+  it('keeps mark all, labels, shortcuts and the panel window unavailable in the browser preview', async () => {
     vi.resetModules(); vi.stubGlobal('chrome', undefined); vi.stubGlobal('indexedDB', new IDBFactory()); const { client } = await import('../../src/platform/client');
     await expect(client.acknowledgeAllWebActivity!()).rejects.toMatchObject({ code: 'runtime.unavailable' }); expect(client.getShortcuts).toBeUndefined();
+    await expect(client.labelWebActivity!(crypto.randomUUID(), 'Revue')).rejects.toMatchObject({ code: 'runtime.unavailable' }); expect(client.getCurrentWindowId).toBeUndefined();
+  });
+  it('sends a label as one RPC and reads the panel window locally, without RPC or permission', async () => {
+    vi.resetModules(); const sendMessage = vi.fn().mockResolvedValue({ ok: true }), getCurrent = vi.fn().mockResolvedValue({ id: 7, focused: true });
+    vi.stubGlobal('chrome', { runtime: { id: 'extension', sendMessage }, windows: { getCurrent } }); const { client } = await import('../../src/platform/client');
+    const id = crypto.randomUUID();
+    await client.labelWebActivity!(id, 'Revue contrat'); await client.labelWebActivity!(id, null);
+    expect(sendMessage.mock.calls).toEqual([[{ channel: 'hub.rpc', request: { method: 'labelWebActivity', id, label: 'Revue contrat' } }], [{ channel: 'hub.rpc', request: { method: 'labelWebActivity', id, label: null } }]]);
+    sendMessage.mockClear();
+    expect(await client.getCurrentWindowId!()).toBe(7); expect(getCurrent).toHaveBeenCalledOnce(); expect(sendMessage).not.toHaveBeenCalled();
+    for (const window of [{}, { id: -1 }, { id: 1.5 }, undefined]) { getCurrent.mockResolvedValueOnce(window); expect(await client.getCurrentWindowId!()).toBeUndefined(); }
+    getCurrent.mockRejectedValueOnce(new Error('No current window')); await expect(client.getCurrentWindowId!()).rejects.toMatchObject({ code: 'runtime.unavailable' });
   });
 });

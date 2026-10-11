@@ -16,7 +16,7 @@ beforeEach(async () => {
   api = {
     runtime: { id: 'test-extension', getURL: (path: string) => `chrome-extension://test-extension/${path}`, sendMessage: vi.fn().mockResolvedValue(undefined), connectNative: vi.fn(), onMessage: signal(), onInstalled: signal() },
     permissions: { contains: vi.fn().mockResolvedValue(true), request: vi.fn(), onRemoved: signal(), onAdded: signal() },
-    tabs: { query: vi.fn().mockResolvedValue([{ id: 4, windowId: 1, url: 'https://claude.ai/chat/private', title: 'Private title' }]), get: vi.fn(), create: vi.fn().mockResolvedValue({ id: 5 }), update: vi.fn(), onCreated: signal(), onUpdated: signal(), onRemoved: signal(), onAttached: signal(), onDetached: signal(), onReplaced: signal() },
+    tabs: { query: vi.fn().mockResolvedValue([{ id: 4, windowId: 1, url: 'https://claude.ai/chat/private', title: 'Private title' }]), get: vi.fn(), create: vi.fn().mockResolvedValue({ id: 5 }), update: vi.fn(), onCreated: signal(), onUpdated: signal(), onRemoved: signal(), onMoved: signal(), onAttached: signal(), onDetached: signal(), onReplaced: signal() },
     scripting: { registerContentScripts: vi.fn().mockResolvedValue(undefined), unregisterContentScripts: vi.fn().mockResolvedValue(undefined), executeScript: vi.fn().mockResolvedValue([]) },
     windows: { update: vi.fn(), getLastFocused: vi.fn().mockResolvedValue({ id: 3 }), onFocusChanged: signal() }, commands: { onCommand: signal(), getAll: vi.fn() }, alarms: { create: vi.fn().mockResolvedValue(undefined), onAlarm: signal() }, sidePanel: { setPanelBehavior: vi.fn().mockResolvedValue(undefined), open: vi.fn().mockResolvedValue(undefined) }, action: { onClicked: signal(), setBadgeText: vi.fn().mockResolvedValue(undefined), setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined), setBadgeTextColor: vi.fn().mockResolvedValue(undefined), setTitle: vi.fn().mockResolvedValue(undefined) },
   };
@@ -196,6 +196,75 @@ describe('standalone service worker trust boundary', () => {
     replies[0]({ ...settings, language: 'fr' }); expect((await older).ok).toBe(true);
     expect(api.action.setTitle).toHaveBeenLastCalledWith({ title: 'Pilovo — 1 working' });
     spy.mockRestore();
+  });
+  it('labels a current observation through a strict RPC, in memory only, and re-reads positions when tabs move', async () => {
+    const activationId = crypto.randomUUID(), canary = 'PRIVATE_LABEL_CANARY';
+    let index = 3;
+    const tab = () => ({ id: 4, windowId: 1, index, url: 'https://claude.ai/chat/private', title: 'Private title', status: 'complete' });
+    api.tabs.get.mockImplementation(async () => tab());
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence: 'input_required' } }] : []);
+    api.tabs.onUpdated.emit(4, { status: 'complete' }, tab()); await vi.advanceTimersByTimeAsync(1100);
+    const [observation] = (await rpc({ method: 'getWebActivity' })).data.observations;
+    expect(observation).toMatchObject({ tabId: 4, sessionNumber: 1, tabIndex: 3, state: 'attention' }); expect(observation).not.toHaveProperty('label');
+    // Strict schema: trimmed 1-40 characters, no C0/C1 controls or bidi embedding/override/isolate characters, a UUID, no extra field.
+    const bidi = ['\u202A', '\u202B', '\u202C', '\u202D', '\u202E', '\u2066', '\u2067', '\u2068', '\u2069'].map(mark => `Revue${mark}contrat`);
+    const labels: unknown[] = ['', '   ', 'x'.repeat(41), ` ${'x'.repeat(41)} `, 'a\u0000b', 'a\tb', 'a\nb', 'a\rb', 'a\u007fb', 'a\u0085b', 'a\u009fb', ...bidi, 42, ['x'], { text: 'x' }, undefined];
+    const invalid = [...labels.map(label => ({ method: 'labelWebActivity', id: observation.id, label })), { method: 'labelWebActivity', id: 'PRIVATE_CANARY', label: 'x' }, { method: 'labelWebActivity', label: 'x' }, { method: 'labelWebActivity', id: observation.id, label: 'x', tabId: 4 }, { method: 'labelWebActivity', id: observation.id, label: 'x', persist: true }];
+    for (const request of invalid) { expect(rpcSchema.safeParse(request).success, JSON.stringify(request)).toBe(false); expect(await rpc(request)).toMatchObject({ ok: false, error: { code: 'validation.invalid' } }); }
+    expect(await rpc({ method: 'labelWebActivity', id: crypto.randomUUID(), label: 'x' })).toMatchObject({ ok: false, error: { code: 'navigation.expired' } });
+    expect((await rpc({ method: 'getWebActivity' })).data.observations[0]).not.toHaveProperty('label');
+    // Forty characters after trimming are accepted and stored trimmed; the change notifies the panels.
+    const label = `${canary} ${'x'.repeat(40 - canary.length - 1)}`;
+    api.runtime.sendMessage.mockClear();
+    expect(await rpc({ method: 'labelWebActivity', id: observation.id, label: `  ${label}  ` })).toMatchObject({ ok: true });
+    await vi.advanceTimersByTimeAsync(250); expect(api.runtime.sendMessage).toHaveBeenCalledWith({ channel: 'hub.changed' });
+    expect((await rpc({ method: 'getWebActivity' })).data.observations[0]).toMatchObject({ id: observation.id, label });
+    // Never persisted, exported or painted: no IndexedDB record, export or chrome.action call carries it.
+    const exported = JSON.stringify((await rpc({ method: 'exportData' })).data);
+    const raw = await openDB('agent-control-hub-v1'), stored: unknown[] = [];
+    for (const store of raw.objectStoreNames) stored.push(await raw.getAll(store));
+    raw.close();
+    const action = JSON.stringify(['setBadgeText', 'setBadgeBackgroundColor', 'setBadgeTextColor', 'setTitle'].map(name => api.action[name].mock.calls));
+    for (const text of [exported, JSON.stringify(stored), action]) expect(text).not.toContain(canary);
+    expect(api.action.setTitle).toHaveBeenLastCalledWith({ title: 'Pilovo — 1 à vérifier (intervention demandée)' });
+    // A tab move re-reads positions only: same observation, state and label, no page access.
+    const injections = api.scripting.executeScript.mock.calls.length;
+    index = 0; api.tabs.onMoved.emit(4, { windowId: 1, fromIndex: 3, toIndex: 0 }); await vi.advanceTimersByTimeAsync(0);
+    expect((await rpc({ method: 'getWebActivity' })).data.observations[0]).toMatchObject({ id: observation.id, tabIndex: 0, state: 'attention', label });
+    expect(api.scripting.executeScript.mock.calls.length).toBe(injections);
+    // null clears; closing the tab drops the row with its label and number.
+    expect(await rpc({ method: 'labelWebActivity', id: observation.id, label: null })).toMatchObject({ ok: true });
+    expect((await rpc({ method: 'getWebActivity' })).data.observations[0]).not.toHaveProperty('label');
+    await rpc({ method: 'labelWebActivity', id: observation.id, label: 'Revue' });
+    api.tabs.onRemoved.emit(4); expect((await rpc({ method: 'getWebActivity' })).data.observations).toEqual([]);
+    expect(await rpc({ method: 'labelWebActivity', id: observation.id, label: 'Revue' })).toMatchObject({ ok: false, error: { code: 'navigation.expired' } });
+  });
+  it('re-reads observed positions when a neighboring tab opens or closes and when a tab detaches or attaches, without page access', async () => {
+    const tabs = new Map<number, any>([4, 6].map((id, slot) => [id, { id, windowId: 1, index: 3 + slot * 2, url: `https://claude.ai/chat/private-${id}`, title: 'Private title', status: 'complete' }]));
+    const activationId = crypto.randomUUID();
+    api.tabs.query.mockImplementation(async () => [...tabs.values()].map(tab => ({ ...tab })));
+    api.tabs.get.mockImplementation(async (id: number) => { const tab = tabs.get(id); if (!tab) throw new Error('No tab with id'); return { ...tab }; });
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: `document-${injection.target.tabId}`, result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence: 'working' } }] : []);
+    for (const id of tabs.keys()) api.tabs.onUpdated.emit(id, { status: 'complete' }, tabs.get(id));
+    await vi.advanceTimersByTimeAsync(1100);
+    const positions = async () => Object.fromEntries((await rpc({ method: 'getWebActivity' })).data.observations.map((observation: any) => [observation.tabId, [observation.windowId, observation.tabIndex]]));
+    expect(await positions()).toEqual({ 4: [1, 3], 6: [1, 5] });
+    // From here on no sample can commit: a position can only change by re-reading the tabs from Chrome.
+    api.scripting.executeScript.mockResolvedValue([]); const injections = api.scripting.executeScript.mock.calls.length;
+    // An unobserved tab between them closes: tab 6 moves left.
+    tabs.get(6).index = 4; api.tabs.onRemoved.emit(5); await vi.advanceTimersByTimeAsync(0);
+    expect(await positions()).toEqual({ 4: [1, 3], 6: [1, 4] });
+    // A new tab opens first in the window: both move right.
+    tabs.get(4).index = 4; tabs.get(6).index = 5; api.tabs.onCreated.emit({ id: 8, windowId: 1, index: 0, url: 'https://example.test/', status: 'complete' }); await vi.advanceTimersByTimeAsync(0);
+    expect(await positions()).toEqual({ 4: [1, 4], 6: [1, 5] });
+    // Tab 4 is dragged out of the window: tab 6 moves left at once.
+    tabs.get(6).index = 4; api.tabs.onDetached.emit(4, { oldWindowId: 1, oldPosition: 4 }); await vi.advanceTimersByTimeAsync(0);
+    expect(await positions()).toEqual({ 4: [1, 4], 6: [1, 4] });
+    expect(api.scripting.executeScript.mock.calls.length).toBe(injections);
+    // It lands first in window 2: its row names the new window and position even before a new sample commits.
+    Object.assign(tabs.get(4), { windowId: 2, index: 0 }); api.tabs.onAttached.emit(4, { newWindowId: 2, newPosition: 0 }); await vi.advanceTimersByTimeAsync(0);
+    expect(await positions()).toEqual({ 4: [2, 0], 6: [1, 4] });
+    expect(JSON.stringify((await rpc({ method: 'getWebActivity' })).data)).not.toMatch(/private-|Private title|https:/);
   });
   it('permits fixed provider opening after denial and refuses removed generic tab capability', async () => {
     api.permissions.contains.mockResolvedValue(false); expect((await rpc({ method: 'openWebProvider', provider: 'chatgpt-web' })).ok).toBe(true); expect(api.tabs.create).toHaveBeenCalledWith({ url: 'https://chatgpt.com/', active: true });

@@ -15,6 +15,17 @@ const row = id => page.locator(`[data-activity-id="${id}"]`);
 const audit = async name => { await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))); await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {})))); const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze(); report.accessibility.push({ name, violations: result.violations.map(({ id, impact, nodes }) => ({ id, impact, targets: nodes.map(node => node.target) })) }); expect(result.violations).toEqual([]); };
 const overflow = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('.page-scroll')].every(element => element.scrollWidth <= element.clientWidth + 1))).toBe(true);
 const elapsed = id => row(id).locator('.activity-elapsed');
+const heading = id => row(id).locator('h3'), place = id => row(id).locator('.activity-place');
+const renameButton = (id, name = 'Nommer cette session') => row(id).getByRole('button', { name, exact: true });
+const nameField = (id, name = /^Nom de /) => row(id).getByRole('textbox', { name });
+// The rename target, or the open field with its focus ring, never overlaps the row's state line or its position line.
+const clearLines = (target, id) => target.locator(`[data-activity-id="${id}"]`).evaluate(row => {
+  const control = row.querySelector('.activity-rename-form input') || row.querySelector('.activity-rename'), style = getComputedStyle(control);
+  const ring = control.matches(':focus-visible') && style.outlineStyle !== 'none' ? Math.max(0, parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset)) : 0;
+  const box = control.getBoundingClientRect(), lines = [...row.querySelectorAll('.activity-state, .activity-place')];
+  return lines.length > 0 && lines.every(line => { const other = line.getBoundingClientRect(); return box.bottom + ring <= other.top || box.top - ring >= other.bottom || box.right + ring <= other.left || box.left - ring >= other.right; });
+});
+const labelCalls = () => page.evaluate(() => window.__activity.calls().label);
 const minuteTicker = () => page.evaluate(() => window.__activity.timers().filter(delay => delay <= 15_000));
 // Elapsed durations are plain row text: never in a live region, and each fits its row without clipping or overflow.
 const quietDurations = async () => expect(await page.evaluate(() => [...document.querySelectorAll('.activity-elapsed')].map(element => !element.closest('[aria-live], [role="status"], [role="alert"], [role="log"], [role="timer"]') && element.scrollWidth <= element.clientWidth + 1 && element.getBoundingClientRect().right <= innerWidth))).toEqual(expect.not.arrayContaining([false]));
@@ -90,6 +101,133 @@ try {
   expect((await page.evaluate(() => window.__activity.calls().ack)).at(-1).attentionId).toBe('event-a');
   pass('duplicate action lock and old acknowledgement cannot acknowledge a newer attention event');
 
+  await page.evaluate(() => window.__activity.seed());
+  // Worker-assigned numbers per provider and Chrome positions (1-based); never tab titles or URLs.
+  await expect(heading('attention')).toHaveText('ChatGPT · session 2'); await expect(heading('working')).toHaveText('ChatGPT · session 1');
+  await expect(heading('idle')).toHaveText('Claude · session 1'); await expect(heading('unsupported')).toHaveText('Claude · session 2');
+  await expect(place('working')).toHaveText('Onglet 4'); await expect(place('idle')).toHaveText('Onglet 2');
+  await expect(place('attention')).toHaveText('Onglet 1 · autre fenêtre'); await expect(place('unsupported')).toHaveCount(0);
+  await page.evaluate(() => window.__activity.close('idle'));
+  await expect(row('idle')).toHaveCount(0); await expect(heading('unsupported')).toHaveText('Claude · session 2');
+  await page.evaluate(() => window.__activity.move('attention', 2, 1));
+  await expect(place('attention')).toHaveText('Onglet 3'); await expect(heading('attention')).toHaveText('ChatGPT · session 2');
+  await page.evaluate(() => window.__activity.panelWindow(2));
+  await expect(place('attention')).toHaveText('Onglet 3 · autre fenêtre'); await expect(place('working')).toHaveText('Onglet 4 · autre fenêtre');
+  await page.evaluate(() => { window.__activity.panelWindow(1); window.__activity.seed(); });
+  await expect(place('attention')).toHaveText('Onglet 1 · autre fenêtre');
+  pass('rows show the worker session number and the tab position, with another window named; closing another tab never renumbers');
+
+  // Keyboard: Tab reaches the rename button, Enter opens the field, Enter applies the name and returns focus to the button.
+  await row('attention').getByRole('button', { name: 'Marquer comme vu' }).focus();
+  await page.keyboard.press('Tab'); await expect(renameButton('working')).toBeFocused();
+  await page.keyboard.press('Tab'); await expect(row('working').getByRole('button', { name: 'Ouvrir la session' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab'); await expect(renameButton('working')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(nameField('working')).toBeFocused(); await expect(nameField('working')).toHaveValue('');
+  // The field says which session it renames, and the row keeps its heading for screen readers while it is open.
+  await expect(nameField('working')).toHaveAccessibleName('Nom de ChatGPT · session 1 (40 caractères au plus, vide pour l’effacer)');
+  await expect(row('working').getByRole('heading', { level: 3 })).toHaveText('ChatGPT · session 1');
+  await page.keyboard.type('Revue contrat'); await page.keyboard.press('Enter');
+  await expect(heading('working')).toHaveText('Revue contrat — ChatGPT'); await expect(row('working').locator('h3 .activity-provider')).toHaveText('— ChatGPT');
+  await expect(renameButton('working')).toBeFocused();
+  expect((await labelCalls()).at(-1)).toEqual({ id: 'working', label: 'Revue contrat' });
+  // Escape cancels the change and restores focus to the button.
+  await page.keyboard.press('Space');
+  await expect(nameField('working')).toHaveValue('Revue contrat'); await expect(row('working').getByRole('heading', { level: 3 })).toHaveText('Revue contrat — ChatGPT');
+  await expect(nameField('working')).toHaveAccessibleName(/^Nom de ChatGPT · session 1 /);
+  await page.keyboard.type('Autre nom'); await page.keyboard.press('Escape');
+  await expect(heading('working')).toHaveText('Revue contrat — ChatGPT'); await expect(renameButton('working')).toBeFocused();
+  expect(await labelCalls()).toHaveLength(1);
+  await expect(page.locator('.activity-row')).toHaveCount(4);
+  // Leaving the field applies the name; focus stays where the user moved it.
+  await renameButton('idle').click(); await page.keyboard.type('Brouillon'); await page.keyboard.press('Tab');
+  await expect(heading('idle')).toHaveText('Brouillon — Claude');
+  await expect(row('idle').getByRole('button', { name: 'Ouvrir la session' })).toBeFocused();
+  // 40 characters at most; a long name wraps inside its row.
+  await renameButton('attention').click(); await page.keyboard.type('x'.repeat(45));
+  expect(await nameField('attention').inputValue()).toBe('x'.repeat(40)); await page.keyboard.press('Enter');
+  await expect(heading('attention')).toHaveText(`${'x'.repeat(40)} — ChatGPT`); await overflow();
+  // An empty name clears the label.
+  await renameButton('idle').focus(); await page.keyboard.press('Enter'); await page.keyboard.press('Backspace'); await page.keyboard.press('Enter');
+  await expect(heading('idle')).toHaveText('Claude · session 1'); expect((await labelCalls()).at(-1)).toEqual({ id: 'idle', label: null });
+  // Bidi override and control characters are refused before sending; the field stays open to correct the text.
+  const sent = (await labelCalls()).length;
+  await page.keyboard.press('Enter'); await page.keyboard.insertText('Revue\u202Econtrat'); await page.keyboard.press('Enter');
+  await expect(row('idle').getByRole('alert')).toContainText('ne peut pas être utilisé');
+  await expect(nameField('idle')).toBeFocused(); await expect(nameField('idle')).toHaveAttribute('aria-invalid', 'true');
+  await audit('activity-rename-invalid-French');
+  // Leaving the field with refused text neither sends nor discards it: the field and its message stay until corrected.
+  await page.keyboard.press('Tab'); await expect(row('idle').getByRole('button', { name: 'Ouvrir la session' })).toBeFocused();
+  await expect(nameField('idle')).toHaveAttribute('aria-invalid', 'true'); await expect(row('idle').getByRole('alert')).toContainText('ne peut pas être utilisé');
+  expect(await nameField('idle').inputValue()).toBe(['Revue', 'contrat'].join(String.fromCodePoint(0x202E)));
+  await nameField('idle').focus();
+  await page.keyboard.press('Escape'); await expect(row('idle').getByRole('alert')).toHaveCount(0); await expect(renameButton('idle')).toBeFocused();
+  expect(await labelCalls()).toHaveLength(sent);
+  // A refused save is announced in the row and keeps the previous heading.
+  await page.evaluate(() => window.__activity.failLabel(true));
+  // A live row without a recognized signal can still be named.
+  await renameButton('unsupported').focus(); await page.keyboard.press('Enter'); await page.keyboard.type('Plus tard'); await page.keyboard.press('Enter');
+  await expect(row('unsupported').getByRole('alert')).toContainText('n’a pas pu être appliqué');
+  await expect(heading('unsupported')).toHaveText('Claude · session 2'); await expect(renameButton('unsupported')).toBeFocused();
+  // The message is about that observation and that name: a navigation in the tab, or a new name, clears it.
+  await renameButton('idle').focus(); await page.keyboard.press('Enter'); await page.keyboard.type('Refusé'); await page.keyboard.press('Enter');
+  await expect(row('idle').getByRole('alert')).toContainText('n’a pas pu être appliqué');
+  await page.evaluate(() => window.__activity.failLabel(false));
+  await page.getByRole('button', { name: 'Actualiser l’activité' }).click();
+  await expect(row('unsupported').getByRole('alert')).toContainText('n’a pas pu être appliqué');
+  await page.evaluate(() => window.__activity.navigate('unsupported', 'unsupported-next'));
+  await expect(row('unsupported-next')).toHaveCount(1); await expect(row('unsupported-next').getByRole('alert')).toHaveCount(0);
+  await page.evaluate(() => window.__activity.rename('idle', 'Ailleurs'));
+  await expect(heading('idle')).toHaveText('Ailleurs — Claude'); await expect(row('idle').getByRole('alert')).toHaveCount(0);
+  await page.evaluate(() => window.__activity.rename('idle', null));
+  // Labels are rendered as text, never markup.
+  await page.evaluate(() => window.__activity.rename('unsupported-next', '<img src=x onerror=alert(1)>'));
+  await expect(heading('unsupported-next')).toHaveText('<img src=x onerror=alert(1)> — Claude'); await expect(row('unsupported-next').locator('h3 img')).toHaveCount(0);
+  pass('rename by keyboard: Enter applies, Escape cancels, leaving the field applies, empty clears, 40-character limit, refused characters keep the field open on Enter or leaving it, failures announced and cleared by a new observation or name, text-only rendering');
+
+  // Polling and a navigation in the same tab keep the open field, its text and focus; the save names the tab's current observation.
+  await renameButton('working').focus(); await page.keyboard.press('Enter'); await page.keyboard.type('Partiel');
+  const readsBeforeEdit = await page.evaluate(() => window.__activity.calls().reads);
+  await expect.poll(() => page.evaluate(() => window.__activity.calls().reads), { timeout: 5000 }).toBeGreaterThan(readsBeforeEdit);
+  await expect(nameField('working')).toBeFocused(); await expect(nameField('working')).toHaveValue('Partiel');
+  await page.evaluate(() => window.__activity.navigate('working', 'working-next'));
+  await expect(row('working-next')).toHaveCount(1);
+  await expect(nameField('working-next')).toBeFocused(); await expect(nameField('working-next')).toHaveValue('Partiel');
+  await audit('activity-rename-open-French');
+  await page.keyboard.press('Enter');
+  await expect(heading('working-next')).toHaveText('Partiel — ChatGPT'); await expect(renameButton('working-next')).toBeFocused();
+  expect((await labelCalls()).at(-1)).toEqual({ id: 'working-next', label: 'Partiel' });
+  await audit('activity-session-identity-French');
+  // Rows follow their tab, so a row error must not outlive its observation: a navigation clears it.
+  await page.evaluate(() => window.__activity.failFocus(true));
+  await row('attention').getByRole('button', { name: 'Ouvrir la session' }).click();
+  await expect(row('attention').getByRole('alert')).toContainText('n’a pas pu être ouverte');
+  await page.evaluate(() => { window.__activity.failFocus(false); window.__activity.navigate('attention', 'attention-next'); });
+  await expect(row('attention-next')).toHaveCount(1); await expect(row('attention-next').getByRole('alert')).toHaveCount(0);
+  pass('polling and same-tab navigation preserve an open rename field and focus; save targets the current observation; navigation clears row errors');
+
+  // Only a live observation can be named, as for focus and seen. A lapsed row keeps a focusable but inert rename button.
+  await page.evaluate(() => window.__activity.seed());
+  await renameButton('idle').focus(); await page.evaluate(() => window.__activity.expire('idle'));
+  await expect(row('idle').locator('.activity-state')).toHaveText('Observation interrompue');
+  await expect(renameButton('idle')).toHaveAttribute('aria-disabled', 'true'); await expect(renameButton('idle')).toBeFocused();
+  const beforeLapsed = (await labelCalls()).length;
+  await page.keyboard.press('Enter'); await renameButton('idle').evaluate(button => button.click());
+  await expect(row('idle').getByRole('textbox')).toHaveCount(0); await expect(renameButton('idle')).toBeFocused();
+  await audit('activity-rename-lapsed-French');
+  // A field still open when its row lapses: the worker refuses the name, the row says so, and focus returns to the button.
+  await renameButton('unsupported').focus(); await page.keyboard.press('Enter'); await page.keyboard.type('Trop tard');
+  await page.evaluate(() => window.__activity.expire('unsupported'));
+  await expect(renameButton('idle')).toHaveAttribute('aria-disabled', 'true'); await expect(row('unsupported').locator('.activity-state')).toHaveText('Observation interrompue');
+  await expect(nameField('unsupported')).toBeFocused(); await page.keyboard.press('Enter');
+  await expect(row('unsupported').getByRole('alert')).toContainText('n’a pas pu être appliqué'); await expect(renameButton('unsupported')).toBeFocused();
+  await expect(renameButton('unsupported')).toHaveAttribute('aria-disabled', 'true'); await expect(heading('unsupported')).toHaveText('Claude · session 2');
+  expect((await labelCalls()).slice(beforeLapsed)).toEqual([{ id: 'unsupported', label: 'Trop tard' }]);
+  // Fresh evidence makes the row nameable again.
+  await page.evaluate(() => window.__activity.seed());
+  await expect(renameButton('idle')).not.toHaveAttribute('aria-disabled', 'true');
+  pass('lapsed rows cannot be named: the rename button stays focusable but inert, and a late save is refused and announced');
+
   await page.evaluate(() => { window.__activity.seed(); window.__activity.addAttention(); });
   await expect(page.locator('.activity-summary dd').first()).toHaveText('2');
   await expect(page.locator('.activity-row').nth(0)).toHaveAttribute('data-activity-id', 'attention');
@@ -114,7 +252,8 @@ try {
   await expect(page.locator('.activity-summary dd').first()).toHaveText('0');
   await expect(markAll).toHaveCount(0); await expect(page.locator('.activity-bulk-error')).toHaveCount(0);
   await expect(page.locator('.activity-row').first().getByRole('button', { name: 'Ouvrir la session' })).toBeFocused();
-  expect(await page.evaluate(() => window.__activity.calls().focus)).toEqual(['attention']);
+  // Only the two refused opens of the earlier checks: marking all as seen never opens a session.
+  expect(await page.evaluate(() => window.__activity.calls().focus)).toEqual(['attention', 'attention']);
   pass('mark all as seen: shown for two items to review, keyboard operable, failure announced and confirmed only by a refreshed snapshot');
 
   await page.evaluate(() => { window.__activity.seed(); window.__activity.addAttention(); window.__activity.holdAckAll(true); });
@@ -224,7 +363,20 @@ try {
   await expect(row('attention')).toContainText('Response available');
   await expect(elapsed('working')).toHaveText('Working for 4 min'); await expect(elapsed('attention')).toHaveText('Available for 2 min');
   await expect(elapsed('idle')).toHaveCount(0); await expect(elapsed('unsupported')).toHaveCount(0);
+  await expect(heading('working')).toHaveText('ChatGPT · session 1'); await expect(place('working')).toHaveText('Tab 4');
+  await expect(place('attention')).toHaveText('Tab 1 · other window');
   await audit('activity-360-dark-English'); await overflow(); await quietDurations(); await screenshot('activity_360_dark');
+  await page.evaluate(() => window.__activity.rename('attention', 'W'.repeat(40)));
+  await expect(heading('attention')).toHaveText(`${'W'.repeat(40)} — ChatGPT`); await overflow();
+  expect(await heading('attention').evaluate(element => element.getBoundingClientRect().right <= element.closest('.activity-row').getBoundingClientRect().right + 1)).toBe(true);
+  await renameButton('working', 'Name this session').focus(); await page.keyboard.press('Enter');
+  await expect(nameField('working', 'Name for ChatGPT · session 1 (40 characters maximum, empty to clear)')).toBeFocused(); await page.keyboard.type('Contract review');
+  await audit('activity-360-dark-English-rename'); await overflow(); expect(await clearLines(page, 'working')).toBe(true);
+  await page.keyboard.press('Enter'); await expect(heading('working')).toHaveText('Contract review — ChatGPT');
+  await expect(renameButton('working', 'Name this session')).toBeFocused();
+  await renameButton('working', 'Name this session').click(); await page.keyboard.insertText('a\u2066b'); await page.keyboard.press('Enter');
+  await expect(row('working').getByRole('alert')).toContainText('This name cannot be used'); await page.keyboard.press('Escape');
+  await page.evaluate(() => { window.__activity.rename('attention', null); window.__activity.rename('working', null); });
   await page.evaluate(() => window.__activity.addAttention());
   await expect(page.getByRole('button', { name: 'Mark all as seen', exact: true })).toBeVisible();
   await expect(page.locator('.activity-shortcut')).toHaveText('Next item to review: Alt+Shift+J');
@@ -238,13 +390,15 @@ try {
   await expect(elapsed('attention-2')).toHaveText('Erreur visible depuis 1 h 05'); await expect(elapsed('working')).toHaveText('En cours depuis 4 min');
   await page.evaluate(() => window.__activity.since('attention', 30_000));
   await expect(elapsed('attention')).toHaveText('Réponse disponible depuis moins d’une minute');
+  await page.evaluate(() => window.__activity.rename('attention-2', 'Revue contrat'));
+  await expect(heading('attention-2')).toHaveText('Revue contrat — Claude'); await expect(place('attention-2')).toHaveText('Onglet 6');
   await audit('activity-360-light-French'); await overflow(); await quietDurations();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   expect(await page.locator('.button').first().evaluate(element => getComputedStyle(element).transitionDuration)).toBe('0s');
   await page.evaluate(() => window.__activity.noShortcuts());
   await expect(page.locator('.activity-shortcut')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Tout marquer comme vu', exact: true })).toBeVisible();
-  pass('French/English, 360px light/dark, elapsed durations, mark all and shortcut hint, reduced motion, no overflow and zero axe violations; hint hidden without shortcut access');
+  pass('French/English, 360px light/dark, elapsed durations, session names and positions, mark all and shortcut hint, reduced motion, no overflow and zero axe violations; hint hidden without shortcut access');
 
   await page.evaluate(() => { window.__activity.hold(true); window.__activity.signal(); });
   const unmountRequest = await page.evaluate(() => window.__activity.pending() - 1);
@@ -273,9 +427,21 @@ try {
     expect(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
     const heights = await touchPage.locator('.activity-bulk .button, .activity-row-actions .button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().height));
     expect(heights.length).toBeGreaterThan(2); expect(Math.min(...heights)).toBeGreaterThanOrEqual(44);
+    const renames = await touchPage.locator('.activity-rename').evaluateAll(buttons => buttons.map(button => { const box = button.getBoundingClientRect(); return Math.min(box.width, box.height); }));
+    expect(renames).toHaveLength(5); expect(Math.min(...renames)).toBeGreaterThanOrEqual(44);
+    // The taller coarse targets, and the open field with its focus ring, stay clear of the state and position lines.
+    for (const id of ['working', 'attention', 'idle']) expect(await clearLines(touchPage, id), `${width} ${id}`).toBe(true);
+    await touchPage.locator('[data-activity-id="working"] .activity-rename').click();
+    expect(await touchPage.locator('.activity-rename-form input').evaluate(input => input.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+    await expect(touchPage.locator('.activity-rename-form input')).toBeFocused(); expect(await clearLines(touchPage, 'working'), `${width} field`).toBe(true);
+    await touchPage.keyboard.press('Escape');
   }
+  // Without a readable panel window (preview), rows keep their position but never claim another window.
+  await expect(touchPage.locator('[data-activity-id="attention"] .activity-place')).toHaveText('Onglet 1 · autre fenêtre');
+  await touchPage.evaluate(() => window.__activity.noWindow());
+  await expect(touchPage.locator('[data-activity-id="attention"] .activity-place')).toHaveText('Onglet 1');
   await touch.close();
-  pass('mark all and row actions keep 44 px coarse-pointer targets at 1200px and 360px');
+  pass('mark all, row actions, rename button and field keep 44 px coarse-pointer targets at 1200px and 360px, clear of the state and position lines; no window claim without the panel window');
   expect(report.errors).toEqual([]);
 } catch (error) { report.failure = String(error); await page.screenshot({ path: path.join(output, 'Pilovo-activity-failure-synthetic.png'), fullPage: true }); throw error; }
 finally { await writeFile(path.join(output, 'Pilovo-activity-report.json'), JSON.stringify(report, null, 2)); await browser.close(); }

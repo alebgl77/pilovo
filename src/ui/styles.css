@@ -546,10 +546,23 @@ summary svg { margin-right: 5px; }
 .activity-working .activity-state, .needs-attention .activity-state { color: var(--accent); }
 .activity-unknown .activity-state { color: var(--warning); }
 .activity-row-content { min-width: 0; }
-.activity-row h3 { font-size: 14px; font-weight: 600; letter-spacing: -.15px; }
+.activity-row h3 { font-size: 14px; font-weight: 600; letter-spacing: -.15px; min-width: 0; overflow-wrap: anywhere; }
+/* The heading line keeps one height whether it shows the name or its field, so actions below never shift under a click. */
+.activity-heading { display: flex; align-items: center; gap: 2px; min-height: 28px; margin-top: -4px; }
+.activity-provider { font-weight: 400; color: var(--muted); }
+.activity-rename { width: 28px; height: 28px; min-height: 28px; }
+.activity-rename-form { flex: 1 1 auto; min-width: 0; max-width: 360px; }
+.activity-rename-form input { height: 28px; min-height: 28px; padding: 2px 8px; font-size: 14px; font-weight: 600; }
+/* Inset rings stay inside the button and the field, so they never cross the state line above or the position line below. */
+.activity-rename:focus-visible, .activity-rename-form input:focus-visible { outline-offset: -2px; }
+/* Not live: focusable, so focus survives a row lapsing, but inert (the worker would refuse the name). */
+.activity-rename[aria-disabled='true'] { opacity: .48; cursor: not-allowed; }
+.activity-rename[aria-disabled='true']:hover { color: var(--muted); background: transparent; }
 .activity-row-content > p { color: var(--muted); font-size: 13px; margin-top: 5px; }
 .needs-attention .activity-row-content > p { color: var(--ink); }
 .activity-row-content > p.activity-elapsed { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.activity-row-content > p.activity-place { color: var(--muted); font-size: 12px; margin-top: 0; }
+.activity-row-content > p.activity-label-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
 .activity-observed { display: flex; flex-wrap: wrap; gap: 3px 6px; color: var(--muted); font-size: 11px; line-height: 1.6; margin-top: 9px; }
 .activity-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 170px; }
 .activity-row-actions .button { font-size: 12px; min-height: 36px; }
@@ -598,4 +611,11 @@ summary svg { margin-right: 5px; }
   .web-provider .provider-actions .button { font-size: 12px; }
 }
 /* Compact activity controls still meet the 44 px coarse-pointer contract (their own rules outrank the global one). */
-@media (pointer: coarse) { .activity-bulk .button, .activity-row-actions .button { min-height: 44px; } }
+@media (pointer: coarse) {
+  .activity-bulk .button, .activity-row-actions .button { min-height: 44px; }
+  .activity-heading { min-height: 44px; margin-top: -12px; }
+  .activity-rename { width: 44px; height: 44px; min-height: 44px; }
+  .activity-rename-form input { height: 44px; min-height: 44px; }
+}
+/* Stacked rows put the state line right above the heading: the taller line must not be pulled up into it. */
+@media (pointer: coarse) and (max-width: 760px) { .activity-heading { margin-top: -4px; } }

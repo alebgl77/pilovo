@@ -32,4 +32,4 @@ for (const file of files) {
   }
 }
 if (problems.length) { console.error(JSON.stringify({ checked: files.length, problems }, null, 2)); process.exitCode = 1; }
-else console.log(JSON.stringify(args.includes('--list') ? { files } : { checked: files.length, passed: true, scope: 'allowlist, common secret signatures, documentation links; not a security certification' }, null, 2));
+else console.log(JSON.stringify(args.includes('--list') ? { files } : { checked: files.length, passed: true, scope: 'allowlist, common secret signatures, raw bidi controls, documentation links; not a security certification' }, null, 2));

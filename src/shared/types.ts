@@ -50,6 +50,8 @@ export interface HubClient {
   focusWebActivity?(id: string): Promise<void>;
   acknowledgeWebActivity?(id: string, attentionId: string): Promise<void>;
   acknowledgeAllWebActivity?(attentionIds?: string[]): Promise<number>;
+  labelWebActivity?(id: string, label: string | null): Promise<void>;
+  getCurrentWindowId?(): Promise<number | undefined>;
   getShortcuts?(): Promise<ActivityShortcuts>;
   getWebDiscovery?(): Promise<WebDiscovery>;
   requestWebDiscoveryPermission?(provider?: WebProvider): Promise<boolean>;

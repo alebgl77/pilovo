@@ -61,6 +61,8 @@ export function scanText(relative, text) {
   ];
   for (const [kind, signature] of signatures) if (signature.test(text)) findings.push({ file: relative, kind });
   if (/(?:[A-Z]:[\\/]Users[\\/][^\s/\\]+|\/Users\/[^\s/]+|\/home\/[^\s/]+)/i.test(text)) findings.push({ file: relative, kind: 'personal-absolute-path' });
+  // Raw bidi embedding, override and isolate characters can reorder how code reads in review ("Trojan Source"); write escapes.
+  if (/[\u202A-\u202E\u2066-\u2069]/u.test(text)) findings.push({ file: relative, kind: 'hidden-bidi-control' });
   return findings;
 }
 export function crc32(bytes) {

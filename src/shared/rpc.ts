@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { hashEvidenceSchema } from '../domain/verification';
 import { controlRequestSchema } from './launch';
 import { webPreparationInputSchema, webPreparationPatchSchema, webProviderSchema } from './web';
+import { activityLabelSchema } from './activity';
 const key = z.string().min(1).max(350);
 export const rpcSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('getWebActivity') }).strict(),
@@ -9,6 +10,8 @@ export const rpcSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('acknowledgeWebActivity'), id: z.uuid(), attentionId: z.uuid() }).strict(),
   // Without IDs (keyboard command), every current attention; with IDs, only those the panel displayed.
   z.object({ method: z.literal('acknowledgeAllWebActivity'), attentionIds: z.array(z.uuid()).min(1).max(256).optional() }).strict(),
+  // A trimmed plain-text label (1-40 characters, no controls or bidi overrides) for one current observation; null clears it.
+  z.object({ method: z.literal('labelWebActivity'), id: z.uuid(), label: activityLabelSchema.nullable() }).strict(),
   z.object({ method: z.literal('getWebDiscovery') }).strict(),
   z.object({ method: z.literal('createWebPreparation'), input: webPreparationInputSchema }).strict(),
   z.object({ method: z.literal('updateWebPreparation'), id: z.uuid(), patch: webPreparationPatchSchema }).strict(),

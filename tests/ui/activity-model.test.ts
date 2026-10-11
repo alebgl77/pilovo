@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { WebActivityObservation, WebActivitySnapshot } from '../../src/shared/activity';
-import { currentObservations, ELAPSED_TICK, formatElapsed, needsAttention, nextElapsedTick, shortcutLabel, stateElapsed } from '../../src/ui/activityModel';
+import { canLabel, currentObservations, ELAPSED_TICK, formatElapsed, labelChange, needsAttention, nextElapsedTick, sessionHeading, sessionPlace, shortcutLabel, stateElapsed } from '../../src/ui/activityModel';
 import { emptyWebDiscovery } from '../../src/shared/web';
 
-const record = (patch: Partial<WebActivityObservation> = {}): WebActivityObservation => ({ id: 'session-a', provider: 'claude-web', tabId: 12, windowId: 1, state: 'attention', attention: { id: 'event-a', reason: 'response_ready', acknowledged: false, raisedAt: 900 }, provenance: 'observed_ui', observedAt: 1000, validUntil: 2000, stateSince: 900, ...patch });
+const record = (patch: Partial<WebActivityObservation> = {}): WebActivityObservation => ({ id: 'session-a', provider: 'claude-web', tabId: 12, windowId: 1, sessionNumber: 1, state: 'attention', attention: { id: 'event-a', reason: 'response_ready', acknowledged: false, raisedAt: 900 }, provenance: 'observed_ui', observedAt: 1000, validUntil: 2000, stateSince: 900, ...patch });
 const snapshot = (observations = [record()]): WebActivitySnapshot => ({ availability: 'available', observedAt: 1000, observations });
 describe('activity presentation invariants', () => {
   it('expires at the exact logical deadline and removes stale attention from counts', () => {
@@ -88,5 +88,50 @@ describe('ephemeral elapsed durations', () => {
     const live = record({ state: 'working', attention: undefined, stateSince: 500, validUntil: 2000 });
     expect(nextElapsedTick(currentObservations(snapshot([live]), emptyWebDiscovery('granted'), 1000, false), 1000)).toBeDefined();
     expect(nextElapsedTick(currentObservations(snapshot([live]), emptyWebDiscovery('granted'), 2000, false), 2000)).toBeUndefined();
+  });
+});
+
+describe('stable session identity in rows', () => {
+  const nb = '\u00a0';
+  it('heads a row with the worker number, or with the user label and the provider as secondary text', () => {
+    expect(sessionHeading(record({ sessionNumber: 3 }))).toEqual({ text: 'Claude · session 3', session: 'Claude · session 3', provider: 'Claude' });
+    expect(sessionHeading(record({ provider: 'chatgpt-web', sessionNumber: 1 })).text).toBe('ChatGPT · session 1');
+    // The numbered form stays available to name the rename field, which edits the label itself.
+    expect(sessionHeading(record({ sessionNumber: 3, label: 'Revue contrat' }))).toEqual({ text: 'Revue contrat — Claude', session: 'Claude · session 3', provider: 'Claude', label: 'Revue contrat' });
+    // The number comes from the worker as is: never recomputed from other rows, and left out when malformed.
+    for (const sessionNumber of [0, -1, 1.5, NaN, undefined, '2']) expect(sessionHeading(record({ sessionNumber: sessionNumber as number })).text).toBe('Claude · session');
+    for (const label of ['', '   ', undefined, 42]) expect(sessionHeading(record({ sessionNumber: 2, label: label as string })).text).toBe('Claude · session 2');
+    // Markup-like text is plain text here; the row renders it as a text node only.
+    expect(sessionHeading(record({ label: '<b>x</b>' })).label).toBe('<b>x</b>');
+  });
+  it('says which tab, 1-based, and mentions another window only when the panel window is known and differs', () => {
+    expect(sessionPlace(record({ tabIndex: 3 }), 1, false)).toBe(`Onglet${nb}4`); expect(sessionPlace(record({ tabIndex: 3 }), 1, true)).toBe(`Tab${nb}4`);
+    expect(sessionPlace(record({ tabIndex: 0, windowId: 2 }), 1, false)).toBe(`Onglet${nb}1 · autre fenêtre`);
+    expect(sessionPlace(record({ tabIndex: 0, windowId: 2 }), 1, true)).toBe(`Tab${nb}1 · other window`);
+    // Preview or failed window read: no window part. No position read yet: the window part alone, or nothing.
+    expect(sessionPlace(record({ tabIndex: 0, windowId: 2 }), undefined, false)).toBe(`Onglet${nb}1`);
+    expect(sessionPlace(record({ windowId: 2 }), 1, false)).toBe('Autre fenêtre'); expect(sessionPlace(record({ windowId: 2 }), 1, true)).toBe('Other window');
+    expect(sessionPlace(record({}), 1, false)).toBeUndefined(); expect(sessionPlace(record({}), undefined, true)).toBeUndefined();
+    for (const tabIndex of [-1, 1.5, NaN, null]) expect(sessionPlace(record({ tabIndex: tabIndex as number }), 1, true)).toBeUndefined();
+    for (const panel of [-1, NaN]) expect(sessionPlace(record({ tabIndex: 1, windowId: 2 }), panel, true)).toBe(`Tab${nb}2`);
+  });
+  it('offers naming only on live rows, as the worker accepts it only for live observations', () => {
+    expect(canLabel(record({ validUntil: 2000 }), 1999)).toBe(true);
+    // A live row whose page shows no recognized signal is still an open, observed tab.
+    expect(canLabel(record({ state: 'unknown', attention: undefined, unknownReason: 'no_evidence', validUntil: 2000 }), 1000)).toBe(true);
+    for (const validUntil of [2000, 1000, NaN, Infinity]) expect(canLabel(record({ validUntil }), 2000), String(validUntil)).toBe(false);
+    // Rows the panel downgraded: expired evidence, or uncertain access or snapshot.
+    const [expired] = currentObservations(snapshot([record({ validUntil: 1500 })]), emptyWebDiscovery('granted'), 1500, false);
+    expect(expired).toMatchObject({ state: 'unknown', unknownReason: 'expired' }); expect(canLabel(expired, 1500)).toBe(false);
+    for (const [failed, pending] of [[true, []], [false, ['claude-web']]] as const) {
+      const [row] = currentObservations(snapshot([record({ validUntil: 5000 })]), emptyWebDiscovery('granted'), 1000, failed, [...pending]);
+      expect(row.unknownReason).toBe('unavailable'); expect(canLabel(row, 1000)).toBe(false);
+    }
+  });
+  it('turns a draft into what the worker accepts: trimmed text, null to clear, undefined when it would be refused', () => {
+    expect(labelChange('  Revue contrat  ')).toBe('Revue contrat'); expect(labelChange('x'.repeat(40))).toBe('x'.repeat(40));
+    expect(labelChange(` ${'x'.repeat(40)} `)).toBe('x'.repeat(40));
+    for (const draft of ['', '   ', '\t']) expect(labelChange(draft)).toBeNull();
+    for (const draft of ['x'.repeat(41), 'a\u0007b', 'a\tb', 'a\u202Eb', 'a\u2066b', 'a\u0085b']) expect(labelChange(draft), JSON.stringify(draft)).toBeUndefined();
   });
 });

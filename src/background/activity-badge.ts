@@ -34,8 +34,9 @@ export function badgeTitle({ review, urgent, working }: BadgeCounts, language: A
 }
 
 /** Computed from live (unexpired) observations only. Unacknowledged attention shows its count on the color of the most
- * urgent reason; otherwise working shows "…"; acknowledged attention, idle and unknown rows never light the badge. */
-export function activityBadge(observations: readonly WebActivityObservation[], now: number, language: ActivityLanguage): ActivityBadge {
+ * urgent reason; otherwise working shows "…"; acknowledged attention, idle and unknown rows never light the badge.
+ * It reads state and attention only: session numbers, positions and labels never reach it. */
+export function activityBadge(observations: readonly Pick<WebActivityObservation, 'validUntil' | 'state' | 'attention'>[], now: number, language: ActivityLanguage): ActivityBadge {
   const live = observations.filter(observation => observation.validUntil > now);
   const pending = live.flatMap(observation => observation.state === 'attention' && observation.attention && !observation.attention.acknowledged ? [observation.attention.reason] : []);
   const working = live.filter(observation => observation.state === 'working').length;

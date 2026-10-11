@@ -36,6 +36,11 @@ test('secret checks redact values and recognize personal paths in public docs', 
   assert.deepEqual(scanText('scripts/check.mjs', personalPath).map(item => item.kind), ['personal-absolute-path']);
   assert.deepEqual(scanText('src/test.ts', 'a harmless string'), []);
 });
+test('source checks refuse raw bidi controls but accept them written as escapes', () => {
+  for (const point of [0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069]) assert.deepEqual(scanText('src/shared/activity.ts', `const unsafe = /[${String.fromCodePoint(point)}]/u;`).map(item => item.kind), ['hidden-bidi-control'], point.toString(16));
+  assert.deepEqual(scanText('src/shared/activity.ts', ['const unsafe = /[', 'u202A-', 'u202E', 'u2066-', 'u2069]/u;'].join(String.fromCharCode(92))), []);
+  assert.deepEqual(scanText('docs/README.fr.md', 'Revue contrat — Claude · « Onglet 4 »'), []);
+});
 test('tracked scan rejects a force-added forbidden file even though source packaging excludes it', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'briefoak-tracked-'));
   t.after(() => rm(root, { recursive: true, force: true }));

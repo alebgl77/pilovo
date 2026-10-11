@@ -72,6 +72,19 @@ try {
   assert.ok(!exportText.includes(canary)); assert.ok(!JSON.stringify(await activity()).includes(canary));
   record('observed work plus two positive completion reads create one metadata-only attention and badge');
 
+  // Tab-level identity: the worker's number, Chrome's real tab position after a move, and a memory-only label.
+  const labelCanary = 'PRIVATE_LABEL_CANARY';
+  assert.equal(observation.sessionNumber, 1); assert.ok(Number.isInteger(observation.tabIndex) && observation.tabIndex >= 0, JSON.stringify(observation));
+  assert.equal((await rpcResult(ui, { method: 'labelWebActivity', id: observation.id, label: 'Revue\u202Econtrat' })).ok, false);
+  await rpc(ui, { method: 'labelWebActivity', id: observation.id, label: `  ${labelCanary}  ` });
+  assert.equal((await activity()).observations[0].label, labelCanary);
+  await ui.evaluate(id => chrome.tabs.move(id, { index: 0 }), observation.tabId);
+  await expect.poll(async () => (await activity()).observations[0]?.tabIndex).toBe(0);
+  assert.equal((await activity()).observations[0].id, observation.id);
+  assert.ok(!JSON.stringify(await rpc(ui, { method: 'exportData' })).includes(labelCanary));
+  assert.ok(!(await ui.evaluate(() => chrome.action.getTitle({}))).includes(labelCanary));
+  record('stable session number, real tab position after a move and a memory-only label absent from export and badge title');
+
   await rpc(ui, { method: 'focusWebActivity', id: observation.id });
   assert.equal(await ui.evaluate(async () => (await chrome.tabs.query({ active: true }))[0].id), observation.tabId);
   await rpc(ui, { method: 'acknowledgeWebActivity', id: observation.id, attentionId: observation.attention.id });
@@ -87,7 +100,9 @@ try {
 
   await provider.reload(); await expect.poll(states).toEqual(['idle']);
   assert.equal((await rpcResult(ui, { method: 'focusWebActivity', id: observation.id })).ok, false);
-  record('same-URL reload destroys prior identity and work witness');
+  const reloaded = (await activity()).observations[0];
+  assert.notEqual(reloaded.id, observation.id); assert.equal(reloaded.sessionNumber, 1); assert.equal(reloaded.label, labelCanary);
+  record('same-URL reload destroys prior identity and work witness but keeps the tab session number and label');
 
   // Exercise the exact evidence module in real DOM fixtures, including current FR markup.
   const built = await build({ entryPoints: [path.join(root, 'src/content/evidence.ts')], bundle: true, format: 'iife', globalName: 'FixtureEvidence', write: false, platform: 'browser' });
@@ -130,7 +145,7 @@ try {
   await expect.poll(async () => (await rpc(reopened, { method: 'getWebActivity' })).observations).toEqual([]);
   await expect.poll(() => reopened.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
   record('closing the observed tab removes observations and clears badge');
-  assert.ok(!JSON.stringify(await rpc(reopened, { method: 'exportData' })).includes(canary));
+  assert.ok(!JSON.stringify(await rpc(reopened, { method: 'exportData' })).includes(canary)); assert.ok(!JSON.stringify(await rpc(reopened, { method: 'exportData' })).includes(labelCanary));
 } catch (error) { failures.push(String(error)); console.error(error); process.exitCode = 1; }
 finally {
   await context?.close();

@@ -9,6 +9,10 @@ export type WebAttentionReason = 'response_ready' | 'input_required' | 'error_vi
 export type WebUnknownReason = 'no_evidence' | 'expired' | 'navigation' | 'unavailable';
 export interface WebActivityObservation {
   id: string; provider: WebProvider; tabId: number; windowId: number;
+  // Tab-level identity, kept by the worker for the tab's lifetime and added to each snapshot; never page content.
+  // sessionNumber: per provider, the smallest free positive integer when the tab is first observed in this worker life.
+  // tabIndex: Chrome's 0-based position of the tab in its window (Tab.index), when read. label: typed by the user.
+  sessionNumber: number; tabIndex?: number; label?: string;
   state: WebActivityState; provenance: 'observed_ui'; observedAt: number; validUntil: number;
   // raisedAt and stateSince use the monotonic clock of validUntil; they are not wall-clock records.
   // raisedAt orders attention. stateSince is when the current state (for attention, its identity) began within this
@@ -22,6 +26,12 @@ export const ACTIVITY_COMMANDS = ['focus-next-attention', 'acknowledge-all-atten
 export type ActivityCommand = typeof ACTIVITY_COMMANDS[number];
 export type ActivityShortcuts = Partial<Record<ActivityCommand, string>>;
 export const activityShortcutsSchema = z.array(z.object({ name: z.string().max(64).optional(), shortcut: z.string().max(64).optional() })).max(32);
+// A session label is plain text typed in the panel and kept in worker memory only. Controls and the bidi embedding,
+// override and isolate characters are refused so a label cannot reorder the row text displayed around it. They are
+// written as escapes: raw bidi controls in source are hidden from review (check:publication refuses them).
+export const ACTIVITY_LABEL_MAX = 40;
+const unsafeLabel = /[\p{Cc}\u202A-\u202E\u2066-\u2069]/u;
+export const activityLabelSchema = z.string().trim().min(1).max(ACTIVITY_LABEL_MAX).refine(value => !unsafeLabel.test(value));
 export interface WebActivitySnapshot {
   availability: 'available' | 'unavailable'; observations: WebActivityObservation[]; observedAt: number;
 }

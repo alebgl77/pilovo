@@ -4,7 +4,7 @@ import type { WebActivityObservation, WebAttentionReason } from '../../src/share
 
 const now = 1_000_000;
 let tab = 0;
-const observation = (state: WebActivityObservation['state'], patch: Partial<WebActivityObservation> = {}): WebActivityObservation => ({ id: crypto.randomUUID(), provider: 'chatgpt-web', tabId: ++tab, windowId: 1, state, provenance: 'observed_ui', observedAt: 1, validUntil: now + 5_000, stateSince: now - 60_000, ...patch });
+const observation = (state: WebActivityObservation['state'], patch: Partial<WebActivityObservation> = {}): WebActivityObservation => ({ id: crypto.randomUUID(), provider: 'chatgpt-web', tabId: ++tab, windowId: 1, sessionNumber: tab, state, provenance: 'observed_ui', observedAt: 1, validUntil: now + 5_000, stateSince: now - 60_000, ...patch });
 const attention = (reason: WebAttentionReason, acknowledged = false, patch: Partial<WebActivityObservation> = {}) => observation('attention', { attention: { id: crypto.randomUUID(), reason, acknowledged, raisedAt: now - 1_000 }, ...patch });
 const working = (patch: Partial<WebActivityObservation> = {}) => observation('working', patch);
 // WCAG 2.x relative luminance and contrast ratio of two #RRGGBB colors.

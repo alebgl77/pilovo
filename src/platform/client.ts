@@ -24,6 +24,13 @@ function extensionClient(): HubClient {
     focusWebActivity: id => rpc({ method: 'focusWebActivity', id }),
     acknowledgeWebActivity: (id, attentionId) => rpc({ method: 'acknowledgeWebActivity', id, attentionId }),
     acknowledgeAllWebActivity: attentionIds => rpc({ method: 'acknowledgeAllWebActivity', attentionIds }),
+    labelWebActivity: (id, label) => rpc({ method: 'labelWebActivity', id, label }),
+    // The window showing this panel or page, so a row can say its tab is elsewhere. Local Chrome state: no RPC or permission.
+    getCurrentWindowId: async () => {
+      let current: { id?: number } | undefined;
+      try { current = await chrome.windows.getCurrent(); } catch { throw new HubError('runtime.unavailable'); }
+      return Number.isSafeInteger(current?.id) && current!.id! >= 0 ? current!.id : undefined;
+    },
     // Local Chrome command state, read without RPC or permission. An unassigned shortcut is blank and stays hidden.
     getShortcuts: async () => {
       let commands: unknown;
@@ -75,7 +82,7 @@ function previewClient(): HubClient {
   void repo.cleanup().catch(() => undefined);
   return {
     getWebActivity: async () => ({ availability: 'unavailable', observations: [], observedAt: Date.now() }),
-    focusWebActivity: unavailable, acknowledgeWebActivity: unavailable, acknowledgeAllWebActivity: unavailable,
+    focusWebActivity: unavailable, acknowledgeWebActivity: unavailable, acknowledgeAllWebActivity: unavailable, labelWebActivity: unavailable,
     getWebDiscovery: async () => emptyWebDiscovery('unavailable'),
     requestWebDiscoveryPermission: async () => false, removeWebDiscoveryPermission: async () => true,
     createWebPreparation: input => change(repo.createWebPreparation(input)),

@@ -1,4 +1,4 @@
-import { ACTIVITY_TTL, activityHintSchema, activitySampleSchema, monotonicEpoch, type ActivityLease, type WebActivitySnapshot } from '../shared/activity';
+import { ACTIVITY_TTL, activityHintSchema, activityLabelSchema, activitySampleSchema, monotonicEpoch, type ActivityLease, type WebActivityObservation, type WebActivitySnapshot } from '../shared/activity';
 import { WEB_PROVIDERS, type WebProvider } from '../shared/web';
 import { HubError } from '../shared/errors';
 import { eligibleWebTab, matchesWebProvider, type WebTab } from '../platform/web';
@@ -24,6 +24,14 @@ export interface ActivityAccess {
 interface Grant { enabled: boolean; id: string; revision: number; queue: Promise<void> }
 interface Slot { generation: number; operation: number; inFlight: boolean; pending: boolean; lastStarted: number; desiredProvider?: WebProvider; timer?: ReturnType<typeof setTimeout>; settled?: Promise<void>; focusing?: number }
 interface HintSender { id?: string; frameId?: number; documentId?: string; documentLifecycle?: string; url?: string; tab?: WebTab }
+// Tab-level identity, independent of the document: it survives navigation and record replacement in the same tab, and
+// ends with the tab, its provider grant, the tab leaving that provider, or this worker. Memory only.
+interface Session { provider: WebProvider; number: number; index?: number }
+// The user's name for a tab, bound to the tab's lifetime rather than to its number: it outlives the tab leaving its
+// provider and coming back, is shown only while the tab is on the provider it was given on, and ends with the tab,
+// that provider's grant or this worker. Memory only.
+interface Label { provider: WebProvider; text: string }
+const validIndex = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 
 export class WebActivity {
   private readonly workerId = crypto.randomUUID();
@@ -31,6 +39,9 @@ export class WebActivity {
   private readonly records = new Map<number, ActivityRecord>();
   private readonly slots = new Map<number, Slot>();
   private readonly sequences = new Map<number, { documentId: string; activationId: string; sequence: number }>();
+  private readonly sessions = new Map<number, Session>();
+  private readonly labels = new Map<number, Label>();
+  private positions = 0;
   private expiry?: ReturnType<typeof setTimeout>;
   private focusing?: Promise<'focused' | 'none' | 'failed'>;
   private badgeQueue = Promise.resolve();
@@ -82,7 +93,9 @@ export class WebActivity {
   }
   private invalidateGrant(provider: WebProvider) {
     const grant = this.grants.get(provider)!; grant.enabled = false; grant.id = crypto.randomUUID();
-    for (const [tabId, record] of this.records) if (record.observation.provider === provider) this.invalidateTab(tabId, true);
+    for (const [tabId, record] of this.records) if (record.observation.provider === provider) this.release(tabId);
+    for (const [tabId, session] of this.sessions) if (session.provider === provider) this.sessions.delete(tabId);
+    for (const [tabId, label] of this.labels) if (label.provider === provider) this.labels.delete(tabId);
     // Jobs not yet represented by a record must also fail the grant identity check.
     this.changed();
   }
@@ -114,24 +127,37 @@ export class WebActivity {
     // A hint does not identify the target document or provide authoritative state.
     this.schedule(tabId, provider);
   }
+  /** remove: the tab closed or was replaced, so everything bound to it goes, its label included. */
   invalidateTab(tabId: number, remove = false) {
-    const slot = this.slots.get(tabId);
-    if (slot) { slot.generation++; slot.operation++; slot.pending = false; clearTimeout(slot.timer); slot.timer = undefined; }
-    this.sequences.delete(tabId);
+    if (remove) { this.labels.delete(tabId); this.release(tabId); return; }
+    this.reset(tabId);
     const record = this.records.get(tabId);
-    if (remove) { this.records.delete(tabId); this.slots.delete(tabId); }
-    else if (record) {
+    if (record) {
       this.records.set(tabId, newActivityRecord(record.observation.provider, tabId, record.observation.windowId, '', this.access.now(), this.access.wall()));
       makeUnknown(this.records.get(tabId)!, 'navigation', this.access.now());
     }
+    this.changed();
+  }
+  private reset(tabId: number) {
+    const slot = this.slots.get(tabId);
+    if (slot) { slot.generation++; slot.operation++; slot.pending = false; clearTimeout(slot.timer); slot.timer = undefined; }
+    this.sequences.delete(tabId);
+  }
+  // The tab is no longer observed for its provider (left it, or its grant ended): its row and number go; a label stays
+  // with the open tab unless the caller removes it.
+  private release(tabId: number) {
+    this.reset(tabId);
+    this.records.delete(tabId); this.slots.delete(tabId); this.sessions.delete(tabId);
     this.changed();
   }
   updateTab(tabId: number, change: { url?: string; status?: string; discarded?: boolean; frozen?: boolean }, tab?: WebTab) {
     if (change.url !== undefined || change.status === 'loading' || change.discarded || change.frozen) this.invalidateTab(tabId);
     if (tab) {
       const provider = WEB_PROVIDERS.find(item => eligibleWebTab(tab, item.id))?.id;
-      if (!provider) this.invalidateTab(tabId, true);
-      else if (!tab.discarded && !tab.frozen && tab.status !== 'loading') this.schedule(tabId, provider);
+      // Leaving a provider ends that session: its number is released, never carried over to another provider. The label
+      // stays with the tab, shown again only if the tab returns to the provider it was given on.
+      if (!provider || this.sessions.has(tabId) && this.sessions.get(tabId)!.provider !== provider) this.release(tabId);
+      if (provider && !tab.discarded && !tab.frozen && tab.status !== 'loading') this.schedule(tabId, provider);
     }
   }
   private schedule(tabId: number, provider: WebProvider) {
@@ -179,6 +205,8 @@ export class WebActivity {
       let record = this.records.get(tabId);
       if (!record || record.identity !== identity || this.access.now() >= record.observation.validUntil) record = newActivityRecord(provider, tabId, tab.windowId, identity, this.access.now(), this.access.wall());
       record.observation.windowId = tab.windowId;
+      const session = this.session(tabId, provider);
+      if (validIndex(tab.index)) session.index = tab.index;
       reduceActivity(record, parsed.data.evidence, this.access.now(), this.access.wall(), lease.expiresAt);
       this.records.set(tabId, record);
       committed = true;
@@ -200,7 +228,52 @@ export class WebActivity {
   }
   snapshot(): WebActivitySnapshot {
     this.expire();
-    return { availability: this.available ? 'available' : 'unavailable', observations: [...this.records.values()].map(record => structuredClone(record.observation)), observedAt: this.access.wall() };
+    return { availability: this.available ? 'available' : 'unavailable', observations: [...this.records.values()].map(record => this.present(record)), observedAt: this.access.wall() };
+  }
+  // A label appears only on its own tab's observation, for the provider it was given on; positions are omitted until
+  // Chrome has reported one.
+  private present(record: ActivityRecord): WebActivityObservation {
+    const { tabId, provider } = record.observation, session = this.session(tabId, provider), label = this.labels.get(tabId);
+    return { ...structuredClone(record.observation), sessionNumber: session.number, ...validIndex(session.index) && { tabIndex: session.index }, ...label?.provider === provider && { label: label.text } };
+  }
+  // Per provider, the smallest positive number no other open tab of that provider holds, assigned at first observation
+  // and kept while the tab lives in this worker. Another tab closing never renumbers it.
+  private session(tabId: number, provider: WebProvider): Session {
+    const current = this.sessions.get(tabId);
+    if (current?.provider === provider) return current;
+    const taken = new Set([...this.sessions].filter(([id, session]) => id !== tabId && session.provider === provider).map(([, session]) => session.number));
+    let number = 1;
+    while (taken.has(number)) number++;
+    const session: Session = { provider, number };
+    this.sessions.set(tabId, session);
+    return session;
+  }
+  /** The user's name for an observed tab, or null to clear it. Worker memory only: kept across navigation in that tab,
+   * gone with the tab, its provider grant or this worker; never persisted, exported, or shown on the badge or its title.
+   * As for focus and seen, the ID must name a live observation: current and with unexpired evidence. */
+  label(id: string, label: string | null) {
+    const parsed = activityLabelSchema.nullable().safeParse(label);
+    if (!parsed.success) throw new HubError('validation.invalid');
+    this.expire();
+    const record = [...this.records.values()].find(item => item.observation.id === id);
+    if (!record || record.observation.validUntil <= this.access.now()) throw new HubError('navigation.expired');
+    const { tabId, provider } = record.observation;
+    if (parsed.data === null) this.labels.delete(tabId); else this.labels.set(tabId, { provider, text: parsed.data });
+    this.changed();
+  }
+  /** Opening, closing or moving any tab shifts the positions of others in its window: re-read observed tabs' index and
+   * window from Chrome (no page access). Samples refresh them too; a newer pass supersedes an older one. */
+  async reindex() {
+    const pass = ++this.positions, tabIds = [...this.sessions.keys()];
+    const tabs = await Promise.all(tabIds.map(id => this.access.tab(id).catch(() => undefined)));
+    if (pass !== this.positions) return;
+    let moved = false;
+    tabIds.forEach((tabId, index) => {
+      const tab = tabs[index], session = this.sessions.get(tabId), record = this.records.get(tabId);
+      if (!tab || tab.id !== tabId || !session || !record || !validIndex(tab.index) || !validIndex(tab.windowId)) return;
+      if (session.index !== tab.index || record.observation.windowId !== tab.windowId) { session.index = tab.index; record.observation.windowId = tab.windowId; moved = true; }
+    });
+    if (moved) this.changed();
   }
   /** With attentionId (keyboard command), the fresh sample must still show that unacknowledged attention. */
   async focus(id: string, attentionId?: string) {

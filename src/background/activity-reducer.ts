@@ -1,12 +1,15 @@
 import type { ActivityEvidence, WebActivityObservation, WebActivityState, WebAttentionReason, WebUnknownReason } from '../shared/activity';
 import type { WebProvider } from '../shared/web';
 
-export interface ActivityRecord { identity: string; observation: WebActivityObservation; worked: boolean; idleSince?: number }
+// What the worker observed in one document. Tab-level identity (session number, position, label) lives beside the
+// records, in WebActivity, and is only added to snapshots: it survives record replacement and never reaches the badge.
+export type ObservedActivity = Omit<WebActivityObservation, 'sessionNumber' | 'tabIndex' | 'label'>;
+export interface ActivityRecord { identity: string; observation: ObservedActivity; worked: boolean; idleSince?: number }
 export function newActivityRecord(provider: WebProvider, tabId: number, windowId: number, identity: string, now: number, wall: number): ActivityRecord {
   return { identity, worked: false, observation: { id: crypto.randomUUID(), provider, tabId, windowId, state: 'unknown', provenance: 'observed_ui', observedAt: wall, validUntil: now, stateSince: now, unknownReason: 'no_evidence' } };
 }
 // stateSince restarts only when the state changes; repeated samples of the same state keep it.
-const enter = (observation: WebActivityObservation, state: WebActivityState, now: number) => { if (observation.state !== state) observation.stateSince = now; observation.state = state; };
+const enter = (observation: ObservedActivity, state: WebActivityState, now: number) => { if (observation.state !== state) observation.stateSince = now; observation.state = state; };
 /** `now` is the monotonic time of the transition; validUntil defaults to it (immediately stale). */
 export function makeUnknown(record: ActivityRecord, reason: WebUnknownReason, now: number, validUntil = now) {
   record.worked = false; delete record.idleSince;

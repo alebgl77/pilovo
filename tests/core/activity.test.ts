@@ -3,6 +3,7 @@ import { WebActivity, type ActivityAccess } from '../../src/background/activity'
 import { makeUnknown, newActivityRecord, reduceActivity } from '../../src/background/activity-reducer';
 import { BADGE_COLORS, BADGE_TEXT_COLOR } from '../../src/background/activity-badge';
 import { activityHintSchema, activitySampleSchema, ACTIVITY_TTL, type ActivityEvidence, type ActivityLease } from '../../src/shared/activity';
+import type { WebTab } from '../../src/platform/web';
 
 describe('conservative activity reducer', () => {
   it('requires witnessed work and two uninterrupted positive reads one second apart', () => {
@@ -129,7 +130,7 @@ describe('leased worker observations', () => {
     activity.updateTab(1, { status: 'complete' }, currentTab()); await tick(1000); expect(row()).toMatchObject({ state: 'working', stateSince: now });
     await tick(3000); activity = new WebActivity(access); activity.start(); await tick(); expect(row()).toMatchObject({ state: 'working', stateSince: now });
     // Bounded, non-content metadata: one number on the monotonic clock.
-    expect(Object.keys(row()).sort()).toEqual(['id', 'observedAt', 'provenance', 'provider', 'state', 'stateSince', 'tabId', 'validUntil', 'windowId']);
+    expect(Object.keys(row()).sort()).toEqual(['id', 'observedAt', 'provenance', 'provider', 'sessionNumber', 'state', 'stateSince', 'tabId', 'validUntil', 'windowId']);
   });
   it('expires strictly using monotonic epoch even if wall clock moves backwards', async () => {
     activity.start(); await tick(); now += ACTIVITY_TTL; expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
@@ -512,5 +513,153 @@ describe('differentiated toolbar badge', () => {
     // Unexpected values fall back to the default language, French.
     activity.setLanguage('de'); await tick(); expect(painted()!.title).toBe('Pilovo — 2 à vérifier, dont 1 intervention demandée · 1 en cours');
     activity.setLanguage('en'); activity.acknowledgeAll(); await tick(); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 1 working'));
+  });
+});
+
+describe('stable session identity: numbers, positions and labels', () => {
+  const urls = new Map<number, string>(), indices = new Map<number, number | undefined>(), windows = new Map<number, number>();
+  const documents = new Map<number, string>(), activations = new Map<number, string>();
+  const gpt = (id: number) => `https://chatgpt.com/c/PRIVATE_URL_CANARY_${id}`, claude = (id: number) => `https://claude.ai/chat/PRIVATE_URL_CANARY_${id}`;
+  const tabOf = (id: number): WebTab => ({ id, windowId: windows.get(id) ?? 2, index: indices.get(id), url: urls.get(id), status: 'complete' });
+  const byTab = (tabId: number) => activity.snapshot().observations.find(observation => observation.tabId === tabId);
+  const numbers = () => Object.fromEntries(activity.snapshot().observations.map(observation => [observation.tabId, observation.sessionNumber]));
+  const samples = () => vi.mocked(access.sample).mock.calls.length;
+  // A tab event only requests a sample; the session is assigned when that leased sample commits.
+  const open = async (id: number, url: string, index?: number) => { urls.set(id, url); indices.set(id, index); documents.set(id, `document-${id}`); activations.set(id, crypto.randomUUID()); activity.updateTab(id, {}, tabOf(id)); await tick(1000); };
+  const go = async (id: number, url: string) => { urls.set(id, url); activity.updateTab(id, { url }, tabOf(id)); await tick(1000); };
+  const refused = (call: () => void) => { try { call(); } catch (error) { return (error as { code?: string }).code; } return undefined; };
+  beforeEach(() => {
+    for (const map of [urls, indices, windows, documents, activations]) map.clear();
+    vi.mocked(access.hasPermission).mockResolvedValue(true);
+    vi.mocked(access.tabs).mockImplementation(async provider => [...urls.keys()].filter(id => urls.get(id)!.startsWith(provider === 'claude-web' ? 'https://claude.ai/' : 'https://chatgpt.com/')).map(tabOf));
+    vi.mocked(access.tab).mockImplementation(async id => { if (!urls.has(id)) throw new Error('No tab with id'); return tabOf(id); });
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: 'working' } }]);
+  });
+  it('numbers each provider from 1 at first observation; another tab closing never renumbers; the smallest free number is reused', async () => {
+    activity.start(); await tick();
+    await open(1, gpt(1)); await open(2, gpt(2)); await open(3, gpt(3)); await open(7, claude(7));
+    expect(numbers()).toEqual({ 1: 1, 2: 2, 3: 3, 7: 1 });
+    activity.invalidateTab(2, true); urls.delete(2);
+    expect(numbers()).toEqual({ 1: 1, 3: 3, 7: 1 });
+    await open(4, gpt(4)); await open(8, claude(8));
+    expect(numbers()).toEqual({ 1: 1, 3: 3, 4: 2, 7: 1, 8: 2 });
+    await open(5, gpt(5)); expect(byTab(5)!.sessionNumber).toBe(4);
+    // Later samples, hints and refreshes never move a number.
+    for (const id of [1, 3, 4, 5]) activity.updateTab(id, {}, tabOf(id));
+    await activity.refresh(); await tick(1000);
+    expect(numbers()).toEqual({ 1: 1, 3: 3, 4: 2, 5: 4, 7: 1, 8: 2 });
+  });
+  it('keeps the number and label across SPA routes, reloads, new documents, discarding and expiry in the same tab', async () => {
+    activity.start(); await tick(); await open(1, gpt(1)); await open(2, gpt(2));
+    activity.label(byTab(2)!.id, 'Revue contrat');
+    const ids = new Set([byTab(2)!.id]);
+    // An SPA route invalidates the record at once (navigation), then a new activation gives a new observation identity.
+    urls.set(2, `${gpt(2)}/route`); activity.updateTab(2, { url: urls.get(2) }, tabOf(2));
+    expect(byTab(2)).toMatchObject({ state: 'unknown', unknownReason: 'navigation', sessionNumber: 2, label: 'Revue contrat' }); ids.add(byTab(2)!.id);
+    activations.set(2, crypto.randomUUID()); await tick(1000);
+    expect(byTab(2)).toMatchObject({ state: 'working', sessionNumber: 2, label: 'Revue contrat' }); ids.add(byTab(2)!.id);
+    // A reload: loading, then a new document.
+    documents.set(2, 'document-2-reloaded'); activity.updateTab(2, { status: 'loading' }, { ...tabOf(2), status: 'loading' });
+    activity.updateTab(2, { status: 'complete' }, tabOf(2)); await tick(1000);
+    expect(byTab(2)).toMatchObject({ state: 'working', sessionNumber: 2, label: 'Revue contrat' }); ids.add(byTab(2)!.id);
+    activity.updateTab(2, { discarded: true }); expect(byTab(2)).toMatchObject({ state: 'unknown', sessionNumber: 2, label: 'Revue contrat' });
+    activity.updateTab(2, { discarded: false }, tabOf(2)); await tick(1000);
+    // Expired evidence: a later sample starts a new record, still the same tab.
+    now += ACTIVITY_TTL; expect(byTab(2)).toMatchObject({ state: 'unknown', unknownReason: 'expired', sessionNumber: 2, label: 'Revue contrat' });
+    activity.updateTab(2, {}, tabOf(2)); await tick(1000); expect(byTab(2)).toMatchObject({ state: 'working', sessionNumber: 2, label: 'Revue contrat' }); ids.add(byTab(2)!.id);
+    expect(ids.size).toBeGreaterThanOrEqual(4);
+    expect(byTab(1)).toMatchObject({ sessionNumber: 1 }); expect(byTab(1)!.label).toBeUndefined();
+  });
+  it('releases numbers when a tab leaves its provider; labels stay with the open tab until it closes, its provider is revoked or the worker restarts', async () => {
+    activity.start(); await tick(); await open(1, gpt(1)); await open(2, gpt(2)); await open(7, claude(7));
+    activity.label(byTab(1)!.id, 'Alpha'); activity.label(byTab(7)!.id, 'Gamma');
+    // Leaving the provider ends the session: coming back later gets the smallest number free then. The label is bound to
+    // the tab's lifetime, not to its number: hidden while the tab is elsewhere, shown again when it returns.
+    await go(1, 'https://example.test/elsewhere');
+    expect(byTab(1)).toBeUndefined(); expect(numbers()).toEqual({ 2: 2, 7: 1 });
+    await open(3, gpt(3)); expect(byTab(3)!.sessionNumber).toBe(1);
+    await go(1, gpt(1)); expect(byTab(1)).toMatchObject({ provider: 'chatgpt-web', sessionNumber: 3, label: 'Alpha' });
+    // Switching provider in the same tab releases the old number at once and never shows the label on the other provider.
+    activity.label(byTab(2)!.id, 'Beta');
+    urls.set(2, claude(2)); activity.updateTab(2, { url: urls.get(2) }, tabOf(2));
+    expect(byTab(2)).toBeUndefined(); await tick(1000);
+    expect(byTab(2)).toMatchObject({ provider: 'claude-web', sessionNumber: 2 }); expect(byTab(2)).not.toHaveProperty('label');
+    await open(4, gpt(4)); expect(byTab(4)!.sessionNumber).toBe(2);
+    // Revocation clears that provider's numbers and labels only, including the label of a tab currently elsewhere.
+    activity.label(byTab(3)!.id, 'Delta');
+    activity.revoke('claude-web'); expect(activity.snapshot().observations.map(observation => observation.provider)).not.toContain('claude-web');
+    expect(byTab(3)).toMatchObject({ sessionNumber: 1, label: 'Delta' }); expect(byTab(1)!.label).toBe('Alpha');
+    activity.reconcile('claude-web'); await tick(1000);
+    expect([byTab(2)!.sessionNumber, byTab(7)!.sessionNumber].sort()).toEqual([1, 2]); expect(byTab(7)).not.toHaveProperty('label');
+    // Tab 2 returns to ChatGPT: the label it was given there is shown again, with a new number.
+    await go(2, gpt(2)); expect(byTab(2)).toMatchObject({ provider: 'chatgpt-web', sessionNumber: 4, label: 'Beta' });
+    await go(2, 'https://example.test/elsewhere'); activity.revoke('chatgpt-web'); activity.reconcile('chatgpt-web'); await tick(1000);
+    await go(2, gpt(2)); expect(byTab(2)).toMatchObject({ provider: 'chatgpt-web' }); expect(byTab(2)).not.toHaveProperty('label');
+    expect(activity.snapshot().observations.some(observation => 'label' in observation)).toBe(false);
+    // Closing a tab while it is elsewhere drops its label too: a later tab with the same ID starts unlabeled.
+    activity.label(byTab(1)!.id, 'Epsilon'); await go(1, 'https://example.test/elsewhere');
+    activity.invalidateTab(1, true); await go(1, gpt(1)); expect(byTab(1)).not.toHaveProperty('label');
+    activity.label(byTab(3)!.id, 'Zeta'); activity.label(byTab(7)!.id, 'Eta'); expect(byTab(3)!.label).toBe('Zeta');
+    // A worker restart keeps nothing: fresh numbers in observation order, no label.
+    activity = new WebActivity(access); expect(activity.snapshot().observations).toEqual([]);
+    activity.start(); await tick(1000);
+    expect(numbers()).toEqual({ 1: 1, 2: 2, 3: 3, 4: 4, 7: 1 });
+    expect(activity.snapshot().observations.some(observation => 'label' in observation)).toBe(false);
+  });
+  it('carries Chrome tab positions and re-reads them on tab moves without sampling, painting or changing state', async () => {
+    activity.start(); await tick(); await open(1, gpt(1), 0); await open(2, gpt(2), 4); await open(3, gpt(3));
+    expect(byTab(1)!.tabIndex).toBe(0); expect(byTab(2)!.tabIndex).toBe(4); expect(byTab(3)).not.toHaveProperty('tabIndex');
+    const before = samples(), paints = vi.mocked(access.badge).mock.calls.length, states = activity.snapshot().observations.map(observation => [observation.id, observation.state]);
+    vi.mocked(access.notify).mockClear();
+    indices.set(1, 2); indices.set(2, 1); indices.set(3, 7); windows.set(2, 5);
+    await activity.reindex();
+    expect(byTab(1)).toMatchObject({ tabIndex: 2, windowId: 2 }); expect(byTab(2)).toMatchObject({ tabIndex: 1, windowId: 5 }); expect(byTab(3)!.tabIndex).toBe(7);
+    expect(activity.snapshot().observations.map(observation => [observation.id, observation.state])).toEqual(states);
+    expect(samples()).toBe(before); expect(access.notify).toHaveBeenCalled(); expect(vi.mocked(access.badge).mock.calls.length).toBe(paints);
+    // Nothing moved: no notification. Invalid positions and unreadable tabs leave the last known position.
+    vi.mocked(access.notify).mockClear(); await activity.reindex(); expect(access.notify).not.toHaveBeenCalled();
+    indices.set(1, -1); indices.set(2, 1.5); urls.delete(3); await activity.reindex();
+    expect(byTab(1)!.tabIndex).toBe(2); expect(byTab(2)!.tabIndex).toBe(1); expect(byTab(3)!.tabIndex).toBe(7);
+    // Each committed sample refreshes the position as well.
+    indices.set(1, 6); activity.updateTab(1, {}, tabOf(1)); await tick(1000); expect(byTab(1)!.tabIndex).toBe(6);
+    // A newer pass supersedes an older one still waiting for Chrome.
+    const slow = deferred<WebTab>(); vi.mocked(access.tab).mockImplementationOnce(() => slow.promise);
+    const older = activity.reindex(); indices.set(1, 9); await activity.reindex(); expect(byTab(1)!.tabIndex).toBe(9);
+    slow.resolve({ ...tabOf(1), index: 3 }); await older; expect(byTab(1)!.tabIndex).toBe(9);
+  });
+  it('keeps a label on its own tab only, in memory, without ever painting it on the badge or its title', async () => {
+    activity.start(); await tick(); await open(1, gpt(1)); await open(2, gpt(2));
+    vi.mocked(access.notify).mockClear();
+    activity.label(byTab(1)!.id, '  Revue PRIVATE_LABEL_CANARY  ');
+    expect(byTab(1)!.label).toBe('Revue PRIVATE_LABEL_CANARY'); expect(byTab(2)).not.toHaveProperty('label'); expect(access.notify).toHaveBeenCalled();
+    activity.label(byTab(2)!.id, 'x'.repeat(40)); expect(byTab(2)!.label).toBe('x'.repeat(40));
+    // Badge and title are computed from state alone: raising attention paints counts and fixed words only.
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: 'input_required' } }]);
+    activity.updateTab(1, {}, tabOf(1)); await tick(1000);
+    expect(painted()).toMatchObject({ text: '1', title: 'Pilovo — 1 à vérifier (intervention demandée) · 1 en cours' });
+    activity.setLanguage('en'); await tick();
+    expect(JSON.stringify(vi.mocked(access.badge).mock.calls)).not.toMatch(/PRIVATE_LABEL|Revue|xxxx/);
+    activity.label(byTab(1)!.id, null); expect(byTab(1)).not.toHaveProperty('label'); expect(byTab(2)!.label).toBe('x'.repeat(40));
+    // Refused before any change: malformed labels, then IDs that name no current observation.
+    for (const invalid of ['', '   ', 'x'.repeat(41), 'a\u0007b', 'a\nb', 'a\tb', 'a\u007fb', 'a\u0085b', 'a\u202Eb', 'a\u2067b', 42, undefined]) expect(refused(() => activity.label(byTab(2)!.id, invalid as string)), JSON.stringify(invalid)).toBe('validation.invalid');
+    expect(refused(() => activity.label(crypto.randomUUID(), 'Autre'))).toBe('navigation.expired'); expect(byTab(2)!.label).toBe('x'.repeat(40));
+    // As for focus and seen, only a live observation can be named or cleared: not one whose evidence has expired (the
+    // label it already has is still shown), not a navigation placeholder, not a replaced observation.
+    now += ACTIVITY_TTL; const expired = byTab(2)!; expect(expired).toMatchObject({ state: 'unknown', unknownReason: 'expired', label: 'x'.repeat(40) });
+    for (const label of ['Plus tard', null]) expect(refused(() => activity.label(expired.id, label))).toBe('navigation.expired');
+    expect(byTab(2)!.label).toBe('x'.repeat(40));
+    // Evidence that lapses without a snapshot in between is refused too: label() checks the deadline itself.
+    activity.updateTab(2, {}, tabOf(2)); await tick(1000); const fresh = byTab(2)!; expect(fresh.state).toBe('attention');
+    now += ACTIVITY_TTL; expect(refused(() => activity.label(fresh.id, 'Plus tard'))).toBe('navigation.expired');
+    activity.updateTab(2, {}, tabOf(2)); await tick(1000); activity.label(byTab(2)!.id, 'Plus tard'); expect(byTab(2)!.label).toBe('Plus tard');
+    const replaced = byTab(2)!;
+    activity.updateTab(2, { status: 'loading' }, { ...tabOf(2), status: 'loading' });
+    expect(byTab(2)).toMatchObject({ unknownReason: 'navigation', label: 'Plus tard' });
+    for (const id of [replaced.id, byTab(2)!.id]) expect(refused(() => activity.label(id, 'Trop tard'))).toBe('navigation.expired');
+    expect(byTab(2)!.label).toBe('Plus tard');
+    // Closing the tab drops its label; a new tab that reuses the number starts unlabeled.
+    activity.invalidateTab(2, true); urls.delete(2); await open(4, gpt(4));
+    expect(byTab(4)).toMatchObject({ sessionNumber: 2 }); expect(byTab(4)).not.toHaveProperty('label');
+    expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|Plus tard|PRIVATE_LABEL/);
   });
 });

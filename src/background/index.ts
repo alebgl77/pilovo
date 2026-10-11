@@ -28,6 +28,7 @@ async function dispatch(request: RpcRequest): Promise<unknown> {
     case 'focusWebActivity': return activity.focus(request.id);
     case 'acknowledgeWebActivity': return activity.acknowledge(request.id, request.attentionId);
     case 'acknowledgeAllWebActivity': return activity.acknowledgeAll(request.attentionIds);
+    case 'labelWebActivity': return activity.label(request.id, request.label);
     case 'getWebDiscovery': return web.discovery();
     case 'openWebProvider': return web.open(request.provider, request.tabId);
     case 'createWebPreparation': return repository.createWebPreparation(request.input);
@@ -70,11 +71,14 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond: (respon
 });
 chrome.permissions.onRemoved.addListener(permission => { invalidateDiscovery(); for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) activity.revoke(provider.id); });
 chrome.permissions.onAdded.addListener(permission => { invalidateDiscovery(); for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) activity.reconcile(provider.id); });
-chrome.tabs.onCreated.addListener(tab => { invalidateDiscovery(); if (tab.id !== undefined) activity.updateTab(tab.id, {}, tab); });
-chrome.tabs.onRemoved.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId, true); });
+// Opening, closing, moving, attaching or detaching a tab shifts its neighbors' positions: observed rows re-read theirs.
+chrome.tabs.onCreated.addListener(tab => { invalidateDiscovery(); if (tab.id !== undefined) activity.updateTab(tab.id, {}, tab); void activity.reindex(); });
+chrome.tabs.onRemoved.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId, true); void activity.reindex(); });
 chrome.tabs.onUpdated.addListener((tabId, change, tab) => { invalidateDiscovery(); activity.updateTab(tabId, change, tab); });
-chrome.tabs.onAttached.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.refresh(); });
-chrome.tabs.onDetached.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId); });
+// A move within a window changes only positions, never evidence or the session, so rows keep their state.
+chrome.tabs.onMoved.addListener(() => { void activity.reindex(); });
+chrome.tabs.onAttached.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.refresh(); void activity.reindex(); });
+chrome.tabs.onDetached.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.reindex(); });
 chrome.tabs.onReplaced.addListener((added, removed) => { invalidateDiscovery(); activity.invalidateTab(removed, true); activity.invalidateTab(added, true); void activity.refresh(); });
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'hub-maintenance') void ready.then(async () => { await repository.cleanup(); notify(); }).catch(() => undefined); });
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'pilovo-activity') { activity.expire(); activity.start(); } });
