@@ -473,7 +473,10 @@ describe('standalone service worker trust boundary', () => {
     await sample('working'); await sample('input_required'); expect(api.notifications.create).toHaveBeenCalledOnce();
     spy.mockRestore();
   });
-  it('applies the stored services before the activity alarm that woke the worker samples, so the first attention is notified', async () => {
+  it.each([
+    { wake: 'alarm', event: 'the activity alarm that woke the worker samples' },
+    { wake: 'grant', event: 'a host access granted as the worker wakes is observed' },
+  ] as const)('applies the stored services before $event, so the first attention is notified', async ({ wake }) => {
     const activationId = crypto.randomUUID(), tab = { id: 4, windowId: 1, index: 0, url: 'https://claude.ai/chat/private', status: 'complete' };
     api.tabs.get.mockResolvedValue(tab); api.windows.getLastFocused.mockResolvedValue({ id: 1, focused: true });
     api.tabs.query.mockImplementation(async (query: any) => query.active ? [{ id: 9, windowId: 1, active: true }] : [tab]);
@@ -489,7 +492,9 @@ describe('standalone service worker trust boundary', () => {
     let release!: () => void; const opened = new Promise<void>(resolve => { release = resolve; });
     const spy = vi.spyOn(HubRepository.prototype, 'updateSettings').mockImplementation(async function (this: InstanceType<typeof HubRepository>, patch) { await opened; return original.call(this, patch); });
     await import('../../src/background/index');
-    api.alarms.onAlarm.emit({ name: 'pilovo-activity' }); await vi.advanceTimersByTimeAsync(3000);
+    if (wake === 'alarm') api.alarms.onAlarm.emit({ name: 'pilovo-activity' });
+    else api.permissions.onAdded.emit({ origins: ['https://claude.ai/*'] });
+    await vi.advanceTimersByTimeAsync(3000);
     expect(api.scripting.executeScript).not.toHaveBeenCalled(); expect(api.notifications.create).not.toHaveBeenCalled();
     release(); expect((await rpc({ method: 'getSnapshot' })).data.settings.notifyProviders).toEqual(['claude-web']); await vi.advanceTimersByTimeAsync(3000);
     expect((await rpc({ method: 'getWebActivity' })).data.observations[0].attention).toMatchObject({ reason: 'input_required' });

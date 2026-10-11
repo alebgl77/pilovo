@@ -237,7 +237,8 @@ export class WebActivity {
   /** remove: the tab closed or was replaced, so everything bound to it goes, its label included. */
   invalidateTab(tabId: number, remove = false) {
     if (remove) { this.labels.delete(tabId); this.release(tabId); return; }
-    this.reset(tabId);
+    // Navigation clears the tab's notification, so it also ends the run: the same reason shown again is notified anew.
+    this.reset(tabId); this.repeats.delete(tabId);
     const record = this.records.get(tabId);
     if (record) {
       this.records.set(tabId, newActivityRecord(record.observation.provider, tabId, record.observation.windowId, '', this.access.now(), this.access.wall()));
@@ -489,9 +490,10 @@ export class WebActivity {
     // The fresh answer replaces the cached view: a dwell restarts only from what Chrome reports now.
     this.view = view; this.dwell();
   }
-  // After each committed sample. A raised reason is a new attention identity; observed work or idle ends the tab's run. An
-  // identity raised again with the same reason, in the same tab and service, with only unknown, failed or expired evidence
-  // since the previous one (a throttled background tab whose evidence lapsed) is the same condition again: not notified twice.
+  // After each committed sample. A raised reason is a new attention identity; observed work or idle ends the tab's run, and
+  // so does navigation (invalidateTab()). An identity raised again with the same reason, in the same tab and service, with
+  // only unknown (other than navigation), failed or expired evidence since the previous one (a throttled background tab
+  // whose evidence lapsed) is the same condition again: not notified twice.
   // A notification still in its grace period has already been rebound to it by syncNotices(), in changed().
   private attended(tabId: number, record: ActivityRecord, raised?: WebAttentionReason) {
     const { provider, state } = record.observation;
@@ -545,8 +547,8 @@ export class WebActivity {
     return grant.enabled && grant.id === notice.grantId && this.notifyProviders.has(notice.provider) && this.sessions.get(notice.tabId)?.provider === notice.provider;
   }
   // Only the evidence lapsed: the tab's record shows no state (expired, even before the watchdog marks it, a failed sample or
-  // no recognized signal), not navigation, and the grace period has not ended. Unknown, failed or expired evidence is also
-  // what the repeat guard in attended() treats as the same condition, so the notification and the guard agree.
+  // no recognized signal), not navigation, and the grace period has not ended. The repeat guard in attended() treats the
+  // same evidence as the same condition, and navigation ends its run as it clears the notification, so the two agree.
   private lapsing(notice: Notice) {
     const observation = this.records.get(notice.tabId)?.observation, now = this.access.now();
     return Boolean(observation) && (observation!.state === 'unknown' || observation!.validUntil <= now) && observation!.unknownReason !== 'navigation'

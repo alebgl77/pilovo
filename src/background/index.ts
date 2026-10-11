@@ -90,9 +90,10 @@ chrome.permissions.onRemoved.addListener(permission => {
   for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) activity.revoke(provider.id);
   if (permission.permissions?.includes(NOTIFICATION_PERMISSION)) activity.notificationsRevoked();
 });
+// A grant that reaches a waking worker starts observing once the stored settings apply, like the activity alarm below.
 chrome.permissions.onAdded.addListener(permission => {
   invalidateDiscovery();
-  for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) activity.reconcile(provider.id);
+  for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) void ready.catch(() => undefined).then(() => activity.reconcile(provider.id));
   if (permission.permissions?.includes(NOTIFICATION_PERMISSION)) { hearNotices(); activity.notificationsGranted(); }
 });
 // Opening, closing, moving, attaching or detaching a tab shifts its neighbors' positions: observed rows re-read theirs.

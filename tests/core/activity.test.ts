@@ -945,7 +945,8 @@ describe('optional OS notifications', () => {
     expect(cleared()).toContain(id); expect(displayed.has(id)).toBe(false);
     // Only that attention's notification goes, unless the change concerns every one.
     expect(displayed.has(other)).toBe(!['revocation', 'service disabled'].includes(change));
-    expect(created()).toHaveLength(2);
+    // Navigation also ends the run: the page, sampled again at once, still shows that reason as a new attention, notified anew.
+    expect(created()).toHaveLength(2 + Number(change === 'navigation'));
   });
   it('a click focuses through the revalidated focus and clears the notification, even when focus fails, without acknowledging', async () => {
     activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
@@ -1003,6 +1004,19 @@ describe('optional OS notifications', () => {
     activity.invalidateTab(1, true); activations.set(1, crypto.randomUUID()); await raise(1, 'input_required'); expect(created()).toHaveLength(4);
     expect(byTab(1)!.attention).toMatchObject({ reason: 'input_required', acknowledged: false });
   });
+  it.each(['freeze', 'navigation', 'window move'] as const)('notifies the same reason raised again after a %s: it cleared the notification and ends the run', async change => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required');
+    const first = idOf(1); expect(created()).toHaveLength(1);
+    if (change === 'freeze') activity.updateTab(1, { frozen: true });
+    else if (change === 'navigation') activity.updateTab(1, { url: `${tabOf(1).url}/next` }, tabOf(1));
+    // Moving a tab to another window detaches then attaches it, as index.ts relays those events.
+    else { activity.invalidateTab(1); activity.invalidateTab(1); }
+    await tick(); expect(cleared()).toEqual([first]); expect(displayed.size).toBe(0);
+    // The page shows the same reason again: a new attention identity to review, notified like any other.
+    activations.set(1, crypto.randomUUID()); await raise(1, 'input_required');
+    expect(byTab(1)!.attention).toMatchObject({ reason: 'input_required', acknowledged: false });
+    expect(created()).toHaveLength(2); expect([...displayed.keys()]).toEqual([idOf(1)]);
+  });
   it('clears a lapsed notification when its grace period ends without the same reason, or at once on other evidence or settings', async () => {
     activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
     const id = idOf(1), other = idOf(2), deadline = byTab(1)!.validUntil;
@@ -1019,8 +1033,8 @@ describe('optional OS notifications', () => {
       else if (change === 'service disabled') activity.setNotifyProviders([]);
       else await raise(2, change);
       await tick(); expect(displayed.has(lapsed), change).toBe(false); expect(cleared()).toContain(lapsed);
-      // Another reason is a new attention: notified in its place.
-      expect(created().length, change).toBe(shown + Number(change === 'error_visible'));
+      // Another reason is a new attention, and so is the same reason sampled after navigation, which ends the run: notified in its place.
+      expect(created().length, change).toBe(shown + Number(change === 'error_visible' || change === 'navigation'));
     }
   });
   it('a click on a notification that outlived a lapse focuses the attention it now stands for, sampling the tab first while it is lapsed', async () => {
