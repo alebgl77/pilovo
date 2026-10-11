@@ -33,9 +33,10 @@ The six Pilovo glyphs are original local SVG paths defined in `scripts/build-ico
 | `pilovo-store-marquee.svg/png` | 1400 × 560 proposed marquee |
 | `pilovo-social-preview.svg/png` | 1280 × 640 social preview |
 | `pilovo-github-banner.svg/png` | 1280 × 640 README banner |
+| `pilovo-tour-en.gif`, `pilovo-tour-fr.gif` | 800 × 450, 20 s looping README tour of the actual UI with synthetic data |
 
 Run `node scripts/build-icons.mjs` for SVGs and analytic icon PNG rendering. Add `--media` to render native SVG tiles with installed Chrome via Playwright; `CHROME_PATH` can select the executable. All content is local. Auxiliary text uses Arial/system fallback; wordmark outlines are platform independent.
 
-The banner's abstract activity rows are editorial shapes, not a product screenshot, user count or measured metric. All promotional tiles visibly say Preview. UI screenshots must separately disclose synthetic data.
+The banner's abstract activity rows are editorial shapes, not a product screenshot, user count or measured metric. All promotional tiles visibly say Preview. UI screenshots must separately disclose synthetic data. The README tours are captures of the synthetic UI harnesses, animated outside this repository; each UI frame carries a synthetic-data footer and unreleased screens carry an UNRELEASED / NON PUBLIÉ label.
 
 Old `briefoak-*` files and [banner provenance](BANNER_PROMPT.md) remain historical references. They are not Pilovo assets and must not be relabeled or used for the current README. Old release archives stay unchanged.

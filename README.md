@@ -9,6 +9,10 @@ Keep track of your ChatGPT and Claude tabs in one quiet workspace. See observed 
 
 [Install](docs/installation.md) · [Français](docs/README.fr.md) · [Privacy](docs/privacy.md) · [Compatibility](docs/compatibility.md) · [Contribute](CONTRIBUTING.md)
 
+![Animated tour of Pilovo: activity, open and seen, session numbers and names, settings, side panel. Synthetic data.](docs/media/pilovo-tour-en.gif)
+
+*Actual interface from the current source, rendered with synthetic local activity fixtures. Not a real provider session or execution proof. Screens marked UNRELEASED are available only when you build from source.*
+
 ## Keep track of the tabs you authorize
 
 1. **Enable one site.** Grant optional access to ChatGPT or Claude separately. Access to one does not enable the other.

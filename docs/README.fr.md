@@ -9,6 +9,10 @@ Gardez le fil de vos onglets ChatGPT et Claude dans un même espace. Repérez le
 
 [English](../README.md) · [Installation pas à pas](installation.md) · [Confidentialité](privacy.md) · [Compatibilité](compatibility.md)
 
+![Visite animée de Pilovo : activité, ouvrir et vu, numéros et noms de session, réglages, panneau latéral. Données fictives.](media/pilovo-tour-fr.gif)
+
+*Interface réelle issue des sources actuelles, alimentée par des fixtures locales synthétiques. Ce n'est ni une session fournisseur réelle ni une preuve d'exécution. Les écrans marqués NON PUBLIÉ ne sont disponibles qu'en compilant depuis les sources.*
+
 ## Premier parcours
 
 1. Ouvrez Pilovo et activez l'observation de **ChatGPT** ou de **Claude**. Chaque site demande son propre accord.
