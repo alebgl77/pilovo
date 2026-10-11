@@ -16,7 +16,8 @@ export function reduceActivity(record: ActivityRecord, evidence: ActivityEvidenc
   delete observation.unknownReason;
   const attention = (reason: WebAttentionReason) => {
     observation.state = 'attention';
-    if (observation.attention?.reason !== reason) observation.attention = { id: crypto.randomUUID(), reason, acknowledged: false };
+    // A new identity records when it was raised; a persisting attention keeps its original order.
+    if (observation.attention?.reason !== reason) observation.attention = { id: crypto.randomUUID(), reason, acknowledged: false, raisedAt: now };
   };
   if (evidence === 'unknown') { makeUnknown(record, 'no_evidence', validUntil); return; }
   if (evidence === 'working') {

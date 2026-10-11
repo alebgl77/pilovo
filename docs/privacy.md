@@ -8,7 +8,7 @@ After you grant access to a provider individually, Pilovo dynamically registers 
 
 Pilovo does not collect full conversations, prompt or response text, tab titles, screenshots, account cookies, credentials, tokens or passwords. No whole-page text is read. Dedicated generic status labels may be matched locally; conversation content is not included in observer messages. Navigation uses tab identity and validates the permitted provider origin; conversation URLs are not retained as activity history.
 
-Activity consists of temporary provider/tab/window identities, observed state, local observation/freshness times, attention reason and local seen acknowledgment. It stays in session memory, without durable activity history or activity export. Restart requires fresh evidence. It does not inspect other extensions or native applications. An open tab does not prove authentication or active work.
+Activity consists of temporary provider/tab/window identities, observed state, local observation/freshness times, attention reason, the attention's raise time on a local monotonic clock and local seen acknowledgment. It stays in session memory, without durable activity history or activity export. Restart requires fresh evidence. It does not inspect other extensions or native applications. An open tab does not prove authentication or active work.
 
 Removing site access invalidates observations and stops authorization renewals. An observer lease expires logically within 15 seconds, including when a worker restart or missed event prevents immediate cleanup. A throttled/suspended document may run the cleanup callback later, but cannot use an expired lease to continue authorized sampling. Stale evidence becomes unknown. Chrome's background scheduling makes toolbar-badge cleanup best effort, not an exact real-time guarantee.
 
@@ -44,7 +44,7 @@ There is no Pilovo backend, cloud account, sync, advertising, remote telemetry o
 | Optional `https://chatgpt.com/*` | ChatGPT tab recognition, bounded status observation and focus |
 | Optional `https://claude.ai/*` | Claude tab recognition, bounded status observation and focus |
 
-The optional grants are requested **per provider**, from an explicit action. Denial leaves official-site navigation available. Revocation does not erase your manually saved history. There is no global `tabs`, `management`, `nativeMessaging`, `notifications` or broad host permission. No static content script is declared; scripts are registered dynamically with session-only registrations after a grant. All executable code ships in the extension.
+The optional grants are requested **per provider**, from an explicit action. Denial leaves official-site navigation available. Revocation does not erase your manually saved history. There is no global `tabs`, `management`, `nativeMessaging`, `notifications` or broad host permission. No static content script is declared; scripts are registered dynamically with session-only registrations after a grant. All executable code ships in the extension. Keyboard shortcuts are declared through Chrome's `commands` manifest key, which is not a permission and grants no site access; the panel reads the configured shortcut text locally from Chrome. So that the shortcut can open the side panel, the worker keeps only the last focused browser window's numeric ID in memory.
 
 ## Erasure and migration
 

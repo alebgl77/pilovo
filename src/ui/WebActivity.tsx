@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Check, Circle, CircleAlert, Eye, LoaderCircle, RefreshCw, Unplug } from 'lucide-react';
-import { monotonicEpoch, type WebActivityObservation, type WebActivitySnapshot } from '../shared/activity';
+import { monotonicEpoch, type ActivityShortcuts, type WebActivityObservation, type WebActivitySnapshot } from '../shared/activity';
 import type { HubClient } from '../shared/types';
-import { currentObservations, needsAttention } from './activityModel';
+import { currentObservations, needsAttention, shortcutLabel } from './activityModel';
 import { ProviderConnections, providerName, useWebServices } from './WebServices';
 import { useObservedResource } from './useObservedResource';
 
 export function WebActivity({ api, en }: { api: HubClient; en: boolean }) {
   const read = useCallback(() => api.getWebActivity?.() || Promise.resolve<WebActivitySnapshot>({ availability: 'unavailable', observations: [], observedAt: Date.now() }), [api]);
-  const activity = useObservedResource(api, read), service = useWebServices(api);
+  const readShortcuts = useCallback(() => api.getShortcuts?.() || Promise.resolve<ActivityShortcuts>({}), [api]);
+  const activity = useObservedResource(api, read), service = useWebServices(api), shortcuts = useObservedResource(api, readShortcuts);
   const [, tick] = useState(0);
   const now = monotonicEpoch();
   const rows = currentObservations(activity.data, service.data, now, activity.error || service.error, service.pending);
@@ -18,7 +19,9 @@ export function WebActivity({ api, en }: { api: HubClient; en: boolean }) {
     providerNumbers.set(record.provider, number);
     return [record.id, number];
   }));
-  const attention = rows.filter(needsAttention).length, working = rows.filter(row => row.state === 'working').length;
+  const attentionIds = rows.filter(needsAttention).map(row => row.attention!.id), attention = attentionIds.length, working = rows.filter(row => row.state === 'working').length;
+  // Unassigned (blank), unreadable or preview shortcuts hide the hint rather than suggesting a key that does nothing.
+  const nextShortcut = shortcuts.error ? undefined : shortcuts.data?.['focus-next-attention'];
   const unknown = rows.filter(row => row.state === 'unknown').length;
   const granted = service.data?.providers.some(provider => provider.permission === 'granted') && !service.error;
   const loading = activity.loading || service.loading;
@@ -32,15 +35,47 @@ export function WebActivity({ api, en }: { api: HubClient; en: boolean }) {
     return () => window.clearTimeout(timer);
   });
   const refresh = () => { void activity.refresh(); void service.refresh(); };
+  const [bulk, setBulk] = useState<'pending' | 'error' | null>(null);
+  const bulkLock = useRef(false), mounted = useRef(false), bulkButton = useRef<HTMLButtonElement>(null), list = useRef<HTMLUListElement>(null);
+  const attentionKey = attentionIds.join(' '), latestKey = useRef(attentionKey);
+  latestKey.current = attentionKey;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { setBulk(state => state === 'error' ? null : state); }, [attentionKey]);
+  const markAll = async () => {
+    if (bulkLock.current || attentionIds.length < 2 || !api.acknowledgeAllWebActivity) return;
+    // Only the identities shown now: an attention raised after this render stays to review.
+    const ids = attentionIds, key = attentionKey, restoreFocus = document.activeElement === bulkButton.current;
+    bulkLock.current = true; setBulk('pending');
+    let failed = false;
+    try {
+      await api.acknowledgeAllWebActivity(ids);
+      // Confirmation comes from a new snapshot, never from an optimistic mutation.
+      if (mounted.current) await activity.refresh();
+    } catch { failed = true; }
+    finally {
+      bulkLock.current = false;
+      if (mounted.current) {
+        setBulk(failed && latestKey.current === key ? 'error' : null);
+        if (restoreFocus) requestAnimationFrame(() => { if (mounted.current) (bulkButton.current || list.current?.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus({ preventScroll: true }); });
+      }
+    }
+  };
   return <div className="page-scroll activity-page">
     <div className="activity-toolbar"><p>{en ? 'Your open sessions, at a glance.' : 'Vos sessions ouvertes, en un regard.'}</p><button className="button subtle" onClick={refresh} aria-label={en ? 'Refresh activity' : 'Actualiser l’activité'}><RefreshCw size={15} aria-hidden="true" />{en ? 'Refresh' : 'Actualiser'}</button></div>
     {activity.error && <div className="activity-notice error" role="alert"><CircleAlert size={18} aria-hidden="true" /><p>{en ? 'Activity could not be refreshed. Previous observations are unconfirmed; open the service to check.' : 'L’activité n’a pas pu être actualisée. Les observations précédentes ne sont plus confirmées ; ouvrez le service pour vérifier.'}</p></div>}
     {loading ? <div className="activity-empty" role="status"><Eye size={23} strokeWidth={1.5} aria-hidden="true" /><h2>{en ? 'Checking open sessions…' : 'Recherche des sessions ouvertes…'}</h2><p>{en ? 'Pilovo checks the services you have connected.' : 'Pilovo vérifie les services que vous avez connectés.'}</p></div> : rows.length ? <>
-      <dl className="activity-summary" aria-label={en ? 'Current observations' : 'Observations actuelles'}>
-        <div><dt>{en ? 'To review' : 'À vérifier'}</dt><dd>{attention}</dd></div><div><dt>{en ? 'Working' : 'En cours'}</dt><dd>{working}</dd></div><div><dt>{en ? 'Unconfirmed' : 'Non confirmées'}</dt><dd>{unknown}</dd></div>
-      </dl>
+      <div className="activity-overview">
+        <dl className="activity-summary" aria-label={en ? 'Current observations' : 'Observations actuelles'}>
+          <div><dt>{en ? 'To review' : 'À vérifier'}</dt><dd>{attention}</dd></div><div><dt>{en ? 'Working' : 'En cours'}</dt><dd>{working}</dd></div><div><dt>{en ? 'Unconfirmed' : 'Non confirmées'}</dt><dd>{unknown}</dd></div>
+        </dl>
+        {(attention >= 2 || nextShortcut) && <div className="activity-bulk">
+          {attention >= 2 && <button ref={bulkButton} className="button" disabled={bulk === 'pending' || !api.acknowledgeAllWebActivity} onClick={() => { void markAll(); }}>{bulk === 'pending' ? en ? 'Saving…' : 'Enregistrement…' : en ? 'Mark all as seen' : 'Tout marquer comme vu'}</button>}
+          {nextShortcut && <p className="activity-shortcut">{en ? 'Next item to review:' : 'Prochain élément à vérifier :'} <kbd>{shortcutLabel(nextShortcut, en)}</kbd></p>}
+        </div>}
+      </div>
+      {bulk === 'error' && <p className="activity-bulk-error" role="alert">{en ? 'These signals could not be marked as seen. They may have changed; refresh activity.' : 'Ces signaux n’ont pas pu être marqués comme vus. Ils ont peut-être changé ; actualisez l’activité.'}</p>}
       <section className="activity-sessions" aria-labelledby="sessions-heading"><div className="activity-list-heading"><h2 id="sessions-heading">{en ? 'Sessions' : 'Sessions'}</h2><span>{en ? 'Attention first' : 'Votre attention d’abord'}</span></div>
-        <ul className="activity-list">{rows.map(record => <ActivityRow key={record.id} record={record} sessionNumber={sessionNumbers.get(record.id)!} api={api} en={en} refresh={activity.refresh} />)}</ul>
+        <ul ref={list} className="activity-list">{rows.map(record => <ActivityRow key={record.id} record={record} sessionNumber={sessionNumbers.get(record.id)!} api={api} en={en} refresh={activity.refresh} />)}</ul>
       </section>
       <p className="activity-semantics">{en ? '“Response available” means generation has ended. Review the answer in the service; your task may still need work.' : '« Réponse disponible » signifie que la génération s’est arrêtée. Vérifiez la réponse dans le service ; votre tâche peut encore demander du travail.'}</p>
     </> : <div className="activity-empty">

@@ -10,9 +10,15 @@ export type WebUnknownReason = 'no_evidence' | 'expired' | 'navigation' | 'unava
 export interface WebActivityObservation {
   id: string; provider: WebProvider; tabId: number; windowId: number;
   state: WebActivityState; provenance: 'observed_ui'; observedAt: number; validUntil: number;
-  attention?: { id: string; reason: WebAttentionReason; acknowledged: boolean };
+  // raisedAt uses the monotonic clock of validUntil; it orders attention and is not a wall-clock record.
+  attention?: { id: string; reason: WebAttentionReason; acknowledged: boolean; raisedAt: number };
   unknownReason?: WebUnknownReason;
 }
+// Keyboard commands are declared in the manifest; they never grant access or carry page data.
+export const ACTIVITY_COMMANDS = ['focus-next-attention', 'acknowledge-all-attention'] as const;
+export type ActivityCommand = typeof ACTIVITY_COMMANDS[number];
+export type ActivityShortcuts = Partial<Record<ActivityCommand, string>>;
+export const activityShortcutsSchema = z.array(z.object({ name: z.string().max(64).optional(), shortcut: z.string().max(64).optional() })).max(32);
 export interface WebActivitySnapshot {
   availability: 'available' | 'unavailable'; observations: WebActivityObservation[]; observedAt: number;
 }

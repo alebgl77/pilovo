@@ -17,6 +17,8 @@ Gardez le fil de vos onglets ChatGPT et Claude dans un même espace. Repérez le
 
 « En cours » repose sur un indicateur reconnu. « Réponse prête » exige un travail d'abord observé, puis un signal de disponibilité stabilisé. « Vu » signifie seulement que vous avez remarqué l'élément. Un onglet ouvert ou une vieille annonce de fin ne prouve ni exécution ni réussite.
 
+**Raccourcis clavier** (non publiés ; construisez les sources d'ici la prochaine version). `Alt+Maj+J` (`Option+Maj+J` sur macOS) rejoint le prochain élément à vérifier : l'attention non vue la plus ancienne, revalidée comme **Ouvrir la session** ; si cette vérification montre qu'elle n'est plus à vérifier, la suivante est essayée. S'il n'y a rien à vérifier, le panneau latéral s'ouvre. **Marquer tous les éléments à vérifier comme vus** n'a pas de touche par défaut ; attribuez-la, ou modifiez `Alt+Maj+J`, dans `chrome://extensions/shortcuts`. Dès que deux éléments ou plus sont à vérifier, le panneau propose aussi **Tout marquer comme vu**. Comme « Vu », cette action reste locale et signifie seulement que vous les avez remarqués.
+
 « Inconnu » signifie que la preuve manque, a expiré ou n'est plus accessible. Les onglets en arrière-plan peuvent être ralentis par Chrome. La preuve expire logiquement après 15 secondes. Le badge représente la dernière attention observée ; son effacement dépend aussi du réveil du service worker et n'est pas garanti en temps réel. Aucune notification système n'est envoyée.
 
 ![Panneau Pilovo avec exemples synthétiques](media/screenshots/Pilovo_activity_desktop_synthetic.png)

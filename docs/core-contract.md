@@ -16,6 +16,8 @@ The observation lifetime and authorization lease are at most 15 seconds logicall
 
 Focus revalidates the provider/tab association and activates its tab/window. It does not change execution. Seen acknowledges one local attention identity; it is not approval, task verification or provider control. There are no stop/pause/resume/launch commands.
 
+Each new attention identity records `raisedAt` on the monotonic clock used by `validUntil`; a persisting attention keeps it. Unreleased keyboard commands reuse these rules. `focus-next-attention` (suggested `Alt+Shift+J`) selects the live, unacknowledged attention raised first, with the lower tab ID on ties, and runs the same focus revalidation; the fresh sample must also still show that unacknowledged attention. A failed attempt moves to the next of the initially selected candidates, never looping. With no candidate, it opens the side panel synchronously within the command gesture, in the command's window or else the last focused browser window (a numeric window ID kept in worker memory); after every candidate failed it tries the same, best effort, since Chrome may no longer accept the gesture. `acknowledge-all-attention` (no default key) and the panel's mark-all action are local seen only, identical to acknowledging each current identity. The panel sends the identities it displayed, so attention raised later stays unacknowledged. Manifest commands are not permissions and carry no page data.
+
 The toolbar badge counts last-observed, unacknowledged attention. Freshness is re-evaluated by the panel and background watchdog. MV3 scheduling can delay badge clearing; no strict real-time or OS-notification guarantee is made. See [compatibility](compatibility.md).
 
 ## Manual web preparation

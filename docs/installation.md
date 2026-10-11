@@ -22,6 +22,17 @@ Remove a site's access through Pilovo or Chrome's extension controls. Revocation
 
 The [compatibility record](compatibility.md) lists the pilot's limits. Provider subscriptions and quotas remain separate.
 
+## Keyboard shortcuts
+
+These shortcuts are unreleased: they are available when you build from source, not in the 0.4.0 archive.
+
+| Command | Default | Effect |
+| --- | --- | --- |
+| Go to the next item to review | `Alt+Shift+J` (`Option+Shift+J` on macOS) | Focuses the earliest unacknowledged attention after the same revalidation as **Open session**, moving on if it no longer needs review; opens the side panel when nothing needs review |
+| Mark all items to review as seen | None | Marks every current attention as seen locally; it verifies nothing and controls nothing |
+
+To assign, change or remove a shortcut, open `chrome://extensions/shortcuts`, find Pilovo and edit its field. Chrome may leave the suggested `Alt+Shift+J` unassigned, for example when another extension already uses it; the panel then hides its shortcut hint until you assign one. Shortcuts are Chrome commands, not permissions, and grant no site access.
+
 ## Build from source
 
 From the clone or Source ZIP root, use Node.js 22.12+:
@@ -49,5 +60,6 @@ Uninstall removes extension storage. Exports, backups, clipboard, provider conve
 5. Envoyez une consigne dans votre compte fournisseur. Pilovo indique l'état seulement si un signal compatible est observé.
 6. Si l'état est **Inconnu**, rejoignez l'onglet : la preuve peut manquer, expirer, être ralentie en arrière-plan ou correspondre à une interface non reconnue. Ne l'interprétez pas comme une fin.
 7. Retirez l'accès de chaque site depuis Pilovo ou Chrome quand vous le souhaitez.
+8. Raccourcis (non publiés, depuis les sources) : `Alt+Maj+J` rejoint le prochain élément à vérifier, ou ouvre le panneau s'il n'y a rien à vérifier. Pour le modifier, ou attribuer une touche à **Marquer tous les éléments à vérifier comme vus**, ouvrez `chrome://extensions/shortcuts`.
 
 Le cœur de Pilovo est gratuit. Aucun compte Pilovo, clé API ou compagnon à installer. Le Chrome Web Store serait un parcours futur plus simple, sous réserve d'une soumission acceptée ; ce pilote s'installe manuellement.

@@ -7,6 +7,8 @@ export const rpcSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('getWebActivity') }).strict(),
   z.object({ method: z.literal('focusWebActivity'), id: z.uuid() }).strict(),
   z.object({ method: z.literal('acknowledgeWebActivity'), id: z.uuid(), attentionId: z.uuid() }).strict(),
+  // Without IDs (keyboard command), every current attention; with IDs, only those the panel displayed.
+  z.object({ method: z.literal('acknowledgeAllWebActivity'), attentionIds: z.array(z.uuid()).min(1).max(256).optional() }).strict(),
   z.object({ method: z.literal('getWebDiscovery') }).strict(),
   z.object({ method: z.literal('createWebPreparation'), input: webPreparationInputSchema }).strict(),
   z.object({ method: z.literal('updateWebPreparation'), id: z.uuid(), patch: webPreparationPatchSchema }).strict(),

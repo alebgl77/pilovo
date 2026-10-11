@@ -11,6 +11,10 @@
   "side_panel": { "default_path": "sidepanel.html" },
   "action": { "default_title": "Pilovo", "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" } },
   "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
-  "commands": { "_execute_action": { "description": "Open Pilovo" } },
+  "commands": {
+    "_execute_action": { "description": "Open Pilovo" },
+    "focus-next-attention": { "suggested_key": { "default": "Alt+Shift+J", "mac": "Alt+Shift+J" }, "description": "__MSG_commandNextAttention__" },
+    "acknowledge-all-attention": { "description": "__MSG_commandAcknowledgeAll__" }
+  },
   "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" }
 }

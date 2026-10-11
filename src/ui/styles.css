@@ -529,6 +529,13 @@ summary svg { margin-right: 5px; }
 .activity-summary dt { color: var(--muted); font-size: 12px; }
 .activity-summary dd { font-size: 27px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1; margin: 0; letter-spacing: -.8px; }
 .activity-summary > div:first-child dd { color: var(--accent); }
+.activity-overview { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 24px; border-top: 1px solid var(--line); }
+.activity-overview > .activity-summary { border-top: 0; }
+.activity-bulk { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; padding-block: 4px 20px; }
+.activity-bulk .button { font-size: 12px; min-height: 36px; }
+.activity-shortcut { font-size: 12px; color: var(--muted); }
+.activity-shortcut kbd { font: inherit; color: var(--ink); background: var(--subtle); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+.activity-bulk-error { color: var(--danger); font-size: 12px; margin: -6px 0 16px; }
 .activity-list-heading { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 0; border-top: 1px solid var(--line); }
 .activity-list-heading h2 { font-size: 15px; }
 .activity-list-heading > span { font-size: 12px; color: var(--muted); }
@@ -573,6 +580,9 @@ summary svg { margin-right: 5px; }
   .activity-summary { gap: 0; justify-content: space-between; padding-block: 18px 22px; }
   .activity-summary dd { font-size: 25px; }
   .activity-summary dt { font-size: 11px; }
+  .activity-overview > .activity-summary { flex: 1 1 100%; }
+  .activity-bulk { align-items: flex-start; padding-top: 0; }
+  .activity-bulk .button { min-height: 40px; }
   .activity-list-heading > span { font-size: 11px; }
   .activity-row { display: flex; flex-direction: column; gap: 10px; padding-block: 18px; }
   .activity-state { font-size: 12px; }
@@ -586,3 +596,5 @@ summary svg { margin-right: 5px; }
   .web-provider .provider-actions { max-width: none; flex: 0 0 calc(100% - 31px); justify-content: flex-start; margin: 0 0 0 31px; }
   .web-provider .provider-actions .button { font-size: 12px; }
 }
+/* Compact activity controls still meet the 44 px coarse-pointer contract (their own rules outrank the global one). */
+@media (pointer: coarse) { .activity-bulk .button, .activity-row-actions .button { min-height: 44px; } }

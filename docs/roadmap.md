@@ -7,6 +7,7 @@ Proposed work, not a delivery commitment. The [activity PRD](activity-manager-pr
 | Experimental ChatGPT/Claude EN/FR web indicators | Qualify live streaming, completion, explicit attention, quota/error and account variants independently |
 | Per-site grants, local isolated observer | Exact-artifact real permission grant/denial/revocation checks |
 | Freshness/unknown, focus and seen acknowledgment | Longer suspended/background-tab and multiple-window testing |
+| Unreleased: next-attention keyboard shortcut and local mark all as seen | Manual real-key checks across platforms and with conflicting extension shortcuts |
 | Last-observed toolbar attention badge | Measure MV3 watchdog delays; no strict real-time guarantee |
 | Separate local preparations, notes, missions/export | Study recovery needs before designing import/sync |
 | EN/FR interface and manual unpacked install | Screen reader/zoom review; consider store submission for simpler onboarding |

@@ -4,6 +4,7 @@ import type { ApiResult, HubClient } from '../shared/types';
 import type { RpcRequest } from '../shared/rpc';
 import { hashFile } from '../domain/verification';
 import { emptyWebDiscovery, WEB_ORIGINS, WEB_PROVIDERS, type WebProvider } from '../shared/web';
+import { ACTIVITY_COMMANDS, activityShortcutsSchema, type ActivityCommand, type ActivityShortcuts } from '../shared/activity';
 
 const isExtension = typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
 async function rpc<T>(request: RpcRequest): Promise<T> {
@@ -22,6 +23,17 @@ function extensionClient(): HubClient {
     getWebActivity: () => rpc({ method: 'getWebActivity' }),
     focusWebActivity: id => rpc({ method: 'focusWebActivity', id }),
     acknowledgeWebActivity: (id, attentionId) => rpc({ method: 'acknowledgeWebActivity', id, attentionId }),
+    acknowledgeAllWebActivity: attentionIds => rpc({ method: 'acknowledgeAllWebActivity', attentionIds }),
+    // Local Chrome command state, read without RPC or permission. An unassigned shortcut is blank and stays hidden.
+    getShortcuts: async () => {
+      let commands: unknown;
+      try { commands = await chrome.commands.getAll(); } catch { throw new HubError('runtime.unavailable'); }
+      const parsed = activityShortcutsSchema.safeParse(commands);
+      if (!parsed.success) throw new HubError('runtime.unavailable');
+      const shortcuts: ActivityShortcuts = {};
+      for (const command of parsed.data) { const shortcut = command.shortcut?.trim(); if (shortcut && ACTIVITY_COMMANDS.includes(command.name as ActivityCommand)) shortcuts[command.name as ActivityCommand] = shortcut; }
+      return shortcuts;
+    },
     getWebDiscovery: () => rpc({ method: 'getWebDiscovery' }),
     // Keep request() directly in the UI's click call stack; the worker never requests permissions.
     requestWebDiscoveryPermission: provider => chrome.permissions.request({ origins: origins(provider) }),
@@ -63,7 +75,7 @@ function previewClient(): HubClient {
   void repo.cleanup().catch(() => undefined);
   return {
     getWebActivity: async () => ({ availability: 'unavailable', observations: [], observedAt: Date.now() }),
-    focusWebActivity: unavailable, acknowledgeWebActivity: unavailable,
+    focusWebActivity: unavailable, acknowledgeWebActivity: unavailable, acknowledgeAllWebActivity: unavailable,
     getWebDiscovery: async () => emptyWebDiscovery('unavailable'),
     requestWebDiscoveryPermission: async () => false, removeWebDiscoveryPermission: async () => true,
     createWebPreparation: input => change(repo.createWebPreparation(input)),
