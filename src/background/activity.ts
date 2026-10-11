@@ -22,7 +22,7 @@ export interface ActivityAccess {
   now(): number; wall(): number;
 }
 interface Grant { enabled: boolean; id: string; revision: number; queue: Promise<void> }
-interface Slot { generation: number; operation: number; inFlight: boolean; pending: boolean; lastStarted: number; desiredProvider?: WebProvider; timer?: ReturnType<typeof setTimeout> }
+interface Slot { generation: number; operation: number; inFlight: boolean; pending: boolean; lastStarted: number; desiredProvider?: WebProvider; timer?: ReturnType<typeof setTimeout>; settled?: Promise<void>; focusing?: number }
 interface HintSender { id?: string; frameId?: number; documentId?: string; documentLifecycle?: string; url?: string; tab?: WebTab }
 
 export class WebActivity {
@@ -140,7 +140,8 @@ export class WebActivity {
     if (!slot) { slot = { generation: 0, operation: 0, inFlight: false, pending: false, lastStarted: -Infinity }; this.slots.set(tabId, slot); }
     slot.pending = true;
     slot.desiredProvider = provider;
-    if (slot.inFlight || slot.timer) return;
+    // A pending focus owns the next sample; hints stay pending and are rescheduled once it ends.
+    if (slot.inFlight || slot.timer || slot.focusing) return;
     const wait = Math.max(0, 1_000 - (this.access.now() - slot.lastStarted));
     slot.timer = setTimeout(() => { slot!.timer = undefined; void this.sample(tabId, slot!.desiredProvider!, slot!); }, wait);
   }
@@ -148,6 +149,7 @@ export class WebActivity {
     const grant = this.grants.get(provider)!;
     if (!grant.enabled || slot.inFlight) return false;
     slot.pending = false; slot.inFlight = true; slot.lastStarted = this.access.now();
+    let release!: () => void; slot.settled = new Promise(resolve => { release = resolve; });
     const generation = slot.generation, operation = ++slot.operation, grantId = grant.id;
     const current = () => grant.enabled && grant.id === grantId && slot.generation === generation && slot.operation === operation;
     // Absolute lease starts before any asynchronous permission or injection work.
@@ -191,7 +193,7 @@ export class WebActivity {
       clearTimeout(timer);
       // Invalidates late work even when Chrome completes an injection after the timeout.
       if (slot.operation === operation) slot.operation++;
-      slot.inFlight = false;
+      slot.inFlight = false; release();
       if (slot.pending && slot.desiredProvider && this.grants.get(slot.desiredProvider)!.enabled) this.schedule(tabId, slot.desiredProvider);
     }
     return committed;
@@ -207,24 +209,28 @@ export class WebActivity {
     if (!record || record.observation.validUntil <= this.access.now()) throw new HubError('navigation.expired');
     const { provider, tabId } = record.observation;
     const slot = this.slots.get(tabId), grant = this.grants.get(provider)!;
-    if (!slot || slot.inFlight) throw new HubError('navigation.changed');
+    if (!slot) throw new HubError('navigation.changed');
     const generation = slot.generation, grantId = grant.id, identity = record.identity;
     const attended = () => !attentionId || record.observation.state === 'attention' && record.observation.attention?.id === attentionId && !record.observation.attention.acknowledged;
     const current = () => this.records.get(tabId) === record && record.identity === identity && slot.generation === generation && this.access.now() < record.observation.validUntil && grant.enabled && grant.id === grantId && attended();
     if (!current()) throw new HubError('navigation.expired');
     // Focus must verify a newly sampled current top frame, even if Chrome's navigation event is still queued.
     // Respect the same per-tab rate bound; an already in-flight job cannot substitute for this fresh proof.
-    const wait = Math.max(0, 1_000 - (this.access.now() - slot.lastStarted));
-    // An armed routine timer shares this deadline and would take the slot first; focus's own sample serves its request.
-    clearTimeout(slot.timer); slot.timer = undefined;
-    if (wait) await new Promise(resolve => setTimeout(resolve, wait));
-    if (!current() || slot.inFlight) {
-      if (slot.pending && slot.desiredProvider) this.schedule(tabId, slot.desiredProvider);
-      throw new HubError('navigation.changed');
+    // While focus waits, routine hints only mark the slot pending, so they cannot take the slot from it.
+    slot.focusing = (slot.focusing || 0) + 1;
+    try {
+      clearTimeout(slot.timer); slot.timer = undefined;
+      // A routine sample already in flight settles within its own 2 s timeout; focus then takes its own sample.
+      if (slot.inFlight) await slot.settled;
+      const wait = Math.max(0, 1_000 - (this.access.now() - slot.lastStarted));
+      if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+      if (!current() || slot.inFlight) throw new HubError('navigation.changed');
+      if (!await this.sample(tabId, provider, slot) || !current()) throw new HubError('navigation.changed');
+      await this.access.focus(provider, tabId, current);
+    } finally {
+      slot.focusing!--;
+      if (!slot.focusing && this.slots.get(tabId) === slot && slot.pending && slot.desiredProvider && this.grants.get(slot.desiredProvider)!.enabled) this.schedule(tabId, slot.desiredProvider);
     }
-    clearTimeout(slot.timer); slot.timer = undefined;
-    if (!await this.sample(tabId, provider, slot) || !current()) throw new HubError('navigation.changed');
-    await this.access.focus(provider, tabId, current);
   }
   acknowledge(id: string, attentionId: string) {
     this.expire();
