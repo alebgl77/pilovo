@@ -1,6 +1,8 @@
 # Design system
 
-Pilovo 0.4.0 Preview opens on observed web activity. A row shows provider, non-sensitive local identity, evidence state and freshness. Focus and seen acknowledgment are separate actions. Mark all as seen appears only when two or more rows need attention, uses the same lock and inline error as rows and confirms through a refreshed snapshot. A discreet hint shows the configured next-attention shortcut and is hidden when none is assigned. Unknown remains explicit when evidence expires or is inaccessible. Manual preparations and historical receipts retain their own provenance in separate views.
+Pilovo 0.4.0 Preview opens on observed web activity. A row shows provider, non-sensitive local identity, evidence state and freshness. Focus and seen acknowledgment are separate actions. Unknown remains explicit when evidence expires or is inaccessible. Manual preparations and historical receipts retain their own provenance in separate views.
+
+Unreleased source adds three activity details. Mark all as seen appears only when two or more rows need attention, uses the same lock and inline error as rows and confirms through a refreshed snapshot. A discreet hint shows the configured next-attention shortcut and is hidden when none is assigned. Working and attention rows, seen or not, add a short plain-text elapsed duration under the reason (“Working for 4 min”, “Réponse disponible depuis 2 min”) in 12 px muted metadata; it updates at minute boundaries without a live region, so it is never announced, and is absent for idle, unknown or unusable times.
 
 The physical scene: a professional reviews an agent's work next to a document in a daylight office, moving between a narrow Chrome side panel and a full browser tab. Light mode uses a white canvas to match that working surface; dark and system modes support evening review without changing semantics.
 
@@ -16,7 +18,7 @@ State design:
 
 - Empty production state explains how actual tasks arrive; there is no seeded demo in product code.
 - Current response-ready attention requires witnessed work and stable ready evidence; it never verifies task success. Historical completion remains labeled as agent-reported.
-- Missing metadata is explicit. Derived duration uses source timestamps and is marked partial for missing/uncertain evidence.
+- Missing metadata is explicit. Historical receipts derive duration from source timestamps and mark it partial for missing/uncertain evidence. Unreleased live elapsed durations restart when evidence is lost and are never stored.
 - Prompts are collapsed and only appear if actually available under consent.
 - Local SHA-256 check results show their scope, reference origin and time separately from overall verification and human review.
 - No pause, stop, approval or notification control is exposed without support.

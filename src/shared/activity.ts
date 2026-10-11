@@ -10,7 +10,10 @@ export type WebUnknownReason = 'no_evidence' | 'expired' | 'navigation' | 'unava
 export interface WebActivityObservation {
   id: string; provider: WebProvider; tabId: number; windowId: number;
   state: WebActivityState; provenance: 'observed_ui'; observedAt: number; validUntil: number;
-  // raisedAt uses the monotonic clock of validUntil; it orders attention and is not a wall-clock record.
+  // raisedAt and stateSince use the monotonic clock of validUntil; they are not wall-clock records.
+  // raisedAt orders attention. stateSince is when the current state (for attention, its identity) began within this
+  // record identity; the panel derives an ephemeral elapsed duration from it, which restarts when evidence is lost.
+  stateSince: number;
   attention?: { id: string; reason: WebAttentionReason; acknowledged: boolean; raisedAt: number };
   unknownReason?: WebUnknownReason;
 }

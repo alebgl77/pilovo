@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { WebActivityObservation, WebActivitySnapshot } from '../../src/shared/activity';
-import { currentObservations, needsAttention, shortcutLabel } from '../../src/ui/activityModel';
+import { currentObservations, ELAPSED_TICK, formatElapsed, needsAttention, nextElapsedTick, shortcutLabel, stateElapsed } from '../../src/ui/activityModel';
 import { emptyWebDiscovery } from '../../src/shared/web';
 
-const record = (patch: Partial<WebActivityObservation> = {}): WebActivityObservation => ({ id: 'session-a', provider: 'claude-web', tabId: 12, windowId: 1, state: 'attention', attention: { id: 'event-a', reason: 'response_ready', acknowledged: false, raisedAt: 900 }, provenance: 'observed_ui', observedAt: 1000, validUntil: 2000, ...patch });
+const record = (patch: Partial<WebActivityObservation> = {}): WebActivityObservation => ({ id: 'session-a', provider: 'claude-web', tabId: 12, windowId: 1, state: 'attention', attention: { id: 'event-a', reason: 'response_ready', acknowledged: false, raisedAt: 900 }, provenance: 'observed_ui', observedAt: 1000, validUntil: 2000, stateSince: 900, ...patch });
 const snapshot = (observations = [record()]): WebActivitySnapshot => ({ availability: 'available', observedAt: 1000, observations });
 describe('activity presentation invariants', () => {
   it('expires at the exact logical deadline and removes stale attention from counts', () => {
@@ -41,5 +41,52 @@ describe('activity presentation invariants', () => {
   it('shows the configured shortcut, labelling Shift as Maj in French only', () => {
     expect(shortcutLabel('Alt+Shift+J', true)).toBe('Alt+Shift+J'); expect(shortcutLabel('Alt+Shift+J', false)).toBe('Alt+Maj+J');
     expect(shortcutLabel('Ctrl+Shift+Y', false)).toBe('Ctrl+Maj+Y'); expect(shortcutLabel('⌥⇧J', false)).toBe('⌥⇧J');
+  });
+});
+
+describe('ephemeral elapsed durations', () => {
+  const second = 1000, minute = 60 * second, nb = '\u00a0';
+  it('formats minute precision in French and English at each boundary', () => {
+    const cases: [number, string, string][] = [
+      [0, 'moins d’une minute', 'under a minute'], [59 * second, 'moins d’une minute', 'under a minute'], [59_999, 'moins d’une minute', 'under a minute'],
+      [60 * second, `1${nb}min`, `1${nb}min`], [4 * minute + 59 * second, `4${nb}min`, `4${nb}min`], [59 * minute, `59${nb}min`, `59${nb}min`],
+      [60 * minute, `1${nb}h${nb}00`, `1${nb}h${nb}00${nb}min`], [61 * minute, `1${nb}h${nb}01`, `1${nb}h${nb}01${nb}min`],
+      [65 * minute + 30 * second, `1${nb}h${nb}05`, `1${nb}h${nb}05${nb}min`], [25 * 60 * minute + 9 * minute, `25${nb}h${nb}09`, `25${nb}h${nb}09${nb}min`],
+    ];
+    for (const [elapsed, fr, en] of cases) { expect(formatElapsed(elapsed, false), String(elapsed)).toBe(fr); expect(formatElapsed(elapsed, true), String(elapsed)).toBe(en); }
+  });
+  it('renders nothing for negative, non-finite or missing values', () => {
+    for (const value of [-1, -minute, NaN, Infinity, -Infinity, undefined]) for (const en of [true, false]) expect(formatElapsed(value, en)).toBeUndefined();
+  });
+  it('times working and attention rows, seen or not, from stateSince only', () => {
+    expect(stateElapsed(record({ state: 'working', attention: undefined, stateSince: 400 }), 1000)).toBe(600);
+    expect(stateElapsed(record({ stateSince: 100 }), 1000)).toBe(900);
+    expect(stateElapsed(record({ stateSince: 100, attention: { id: 'event-a', reason: 'error_visible', acknowledged: true, raisedAt: 100 } }), 1000)).toBe(900);
+    for (const state of ['idle', 'unknown'] as const) expect(stateElapsed(record({ state, attention: undefined, stateSince: 100 }), 1000)).toBeUndefined();
+    // Clock skew between contexts or a malformed value hides the duration instead of showing a wrong one.
+    expect(stateElapsed(record({ stateSince: 1001 }), 1000)).toBeUndefined();
+    expect(stateElapsed(record({ stateSince: NaN }), 1000)).toBeUndefined();
+    expect(stateElapsed({ ...record(), stateSince: undefined } as unknown as WebActivityObservation, 1000)).toBeUndefined();
+    // The panel receives JSON: NaN and ±Infinity arrive as null, which arithmetic would coerce to 0; a string would coerce too.
+    for (const stateSince of [NaN, Infinity, -Infinity]) {
+      const wire = JSON.parse(JSON.stringify(record({ state: 'working', attention: undefined, stateSince }))) as WebActivityObservation;
+      expect(wire.stateSince).toBeNull(); expect(stateElapsed(wire, 1000)).toBeUndefined(); expect(nextElapsedTick([wire], 1000)).toBeUndefined();
+    }
+    expect(stateElapsed({ ...record(), stateSince: '100' } as unknown as WebActivityObservation, 1000)).toBeUndefined();
+    expect(stateElapsed(record({ stateSince: 100 }), NaN)).toBeUndefined();
+  });
+  it('wakes for the nearest minute boundary, at most every 15 s, and only while a duration is shown', () => {
+    const at = (stateSince: number, state: WebActivityObservation['state'] = 'working') => record({ state, attention: state === 'attention' ? record().attention : undefined, stateSince });
+    const now = 10 * minute;
+    expect(nextElapsedTick([at(now - 59 * second)], now)).toBe(1001);
+    expect(nextElapsedTick([at(now - 30 * second), at(now - 3 * minute - 50 * second, 'attention')], now)).toBe(10 * second + 1);
+    expect(nextElapsedTick([at(now)], now)).toBe(ELAPSED_TICK); expect(nextElapsedTick([at(now - 44 * second)], now)).toBe(ELAPSED_TICK);
+    expect(nextElapsedTick([at(now - 59_999.5)], now)).toBe(2);
+    expect(nextElapsedTick([], now)).toBeUndefined();
+    expect(nextElapsedTick([at(now - minute, 'idle'), at(now - minute, 'unknown'), at(now + second), at(NaN)], now)).toBeUndefined();
+    // Rows downgraded by currentObservations (expired, unavailable) are unknown and stop the ticker.
+    const live = record({ state: 'working', attention: undefined, stateSince: 500, validUntil: 2000 });
+    expect(nextElapsedTick(currentObservations(snapshot([live]), emptyWebDiscovery('granted'), 1000, false), 1000)).toBeDefined();
+    expect(nextElapsedTick(currentObservations(snapshot([live]), emptyWebDiscovery('granted'), 2000, false), 2000)).toBeUndefined();
   });
 });

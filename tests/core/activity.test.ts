@@ -42,6 +42,40 @@ describe('conservative activity reducer', () => {
     expect(record.observation.attention).toMatchObject({ reason: 'response_ready', raisedAt: 4100 });
     reduceActivity(record, 'idle_ready', 9000, 6, 24000); expect(record.observation.attention!.raisedAt).toBe(4100);
   });
+  it('times the displayed state with stateSince: kept across same-state samples and the ready debounce, reset on change', () => {
+    const record = newActivityRecord('chatgpt-web', 1, 2, 'session', 50, 99_000);
+    expect(record.observation).toMatchObject({ state: 'unknown', stateSince: 50 });
+    reduceActivity(record, 'unknown', 80, 1, 15080); expect(record.observation).toMatchObject({ state: 'unknown', stateSince: 50, validUntil: 15080 });
+    reduceActivity(record, 'idle_ready', 100, 1, 15100); expect(record.observation).toMatchObject({ state: 'idle', stateSince: 100 });
+    reduceActivity(record, 'idle_ready', 600, 2, 15600); expect(record.observation.stateSince).toBe(100);
+    reduceActivity(record, 'working', 1000, 3, 16000); expect(record.observation).toMatchObject({ state: 'working', stateSince: 1000 });
+    reduceActivity(record, 'working', 4000, 4, 19000); expect(record.observation.stateSince).toBe(1000);
+    // While the 1 s ready debounce runs the state stays working, so its duration must not restart.
+    reduceActivity(record, 'idle_ready', 5000, 5, 20000); reduceActivity(record, 'idle_ready', 5999, 6, 20999);
+    expect(record.observation).toMatchObject({ state: 'working', stateSince: 1000 });
+    reduceActivity(record, 'idle_ready', 6000, 7, 21000);
+    expect(record.observation).toMatchObject({ state: 'attention', stateSince: 6000, attention: { reason: 'response_ready', raisedAt: 6000 } });
+    record.observation.attention!.acknowledged = true; reduceActivity(record, 'idle_ready', 9000, 8, 24000);
+    expect(record.observation).toMatchObject({ stateSince: 6000, attention: { acknowledged: true, raisedAt: 6000 } });
+    // A new attention identity resets both, even though the state stays attention.
+    reduceActivity(record, 'input_required', 9500, 9, 24500); reduceActivity(record, 'input_required', 9900, 9, 24900);
+    expect(record.observation).toMatchObject({ stateSince: 9500, attention: { reason: 'input_required', raisedAt: 9500 } });
+    reduceActivity(record, 'error_visible', 10_000, 10, 25000);
+    expect(record.observation).toMatchObject({ stateSince: 10_000, attention: { reason: 'error_visible', raisedAt: 10_000 } });
+    reduceActivity(record, 'idle_ready', 11_000, 11, 26000); expect(record.observation).toMatchObject({ state: 'idle', stateSince: 11_000 });
+    // Unknown evidence restarts the state at the sample time, not at the lease deadline it keeps as validUntil.
+    reduceActivity(record, 'working', 12_000, 12, 27000); reduceActivity(record, 'unknown', 13_000, 13, 28000);
+    expect(record.observation).toMatchObject({ state: 'unknown', stateSince: 13_000, validUntil: 28000 });
+    reduceActivity(record, 'working', 14_000, 14, 29000); expect(record.observation).toMatchObject({ state: 'working', stateSince: 14_000 });
+  });
+  it('makeUnknown restarts stateSince from any other state and keeps it while already unknown', () => {
+    const record = newActivityRecord('claude-web', 1, 2, 'session', 0, 0);
+    reduceActivity(record, 'input_required', 500, 0, 15500); expect(record.observation.stateSince).toBe(record.observation.attention!.raisedAt);
+    makeUnknown(record, 'unavailable', 2000); expect(record.observation).toMatchObject({ state: 'unknown', stateSince: 2000, validUntil: 2000, unknownReason: 'unavailable' });
+    makeUnknown(record, 'expired', 3000); expect(record.observation).toMatchObject({ stateSince: 2000, unknownReason: 'expired' });
+    reduceActivity(record, 'working', 4000, 0, 19000); makeUnknown(record, 'navigation', 5000);
+    expect(record.observation).toMatchObject({ state: 'unknown', stateSince: 5000, unknownReason: 'navigation' }); expect(record.observation.attention).toBeUndefined();
+  });
 });
 
 let access: ActivityAccess, activity: WebActivity, now: number, evidence: ActivityEvidence, documentId: string, activationId: string;
@@ -74,6 +108,26 @@ describe('leased worker observations', () => {
     await activity.hint(hint(2), sender()); await tick(1000); expect(row().attention!.id).toBe(observed.attention!.id);
     const focusing = activity.focus(observed.id); await tick(1000); await focusing; expect(access.focus).toHaveBeenCalledOnce();
     expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|title|prompt|responseText|documentId|activationId/);
+  });
+  it('carries an ephemeral stateSince that persists through same-state samples and restarts when evidence is lost', async () => {
+    const started = now; activity.start(); await tick(); expect(row()).toMatchObject({ state: 'working', stateSince: started });
+    for (let step = 2; step < 6; step++) { await activity.hint(hint(step), sender()); await tick(1000); }
+    expect(row()).toMatchObject({ state: 'working', stateSince: started }); expect(access.sample).toHaveBeenCalledTimes(5);
+    // The ready debounce keeps working and its start; the response-ready identity starts when it is raised.
+    evidence = 'idle_ready'; await activity.hint(hint(6), sender()); await tick(1000); expect(row()).toMatchObject({ state: 'working', stateSince: started });
+    await tick(1000); const raised = row(); expect(raised.state).toBe('attention'); expect(raised.stateSince).toBe(raised.attention!.raisedAt); expect(raised.stateSince).toBeGreaterThan(started);
+    activity.acknowledge(raised.id, raised.attention!.id); await activity.hint(hint(7), sender()); await tick(1000);
+    expect(row()).toMatchObject({ stateSince: raised.stateSince, attention: { acknowledged: true } });
+    // Expiry, then fresh evidence: a new record, so the duration restarts instead of spanning the gap.
+    now += ACTIVITY_TTL; expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
+    evidence = 'working'; await activity.hint(hint(8), sender()); await tick(1000);
+    const resumed = row(); expect(resumed.id).not.toBe(raised.id); expect(resumed).toMatchObject({ state: 'working', stateSince: now });
+    // Navigation and a worker restart restart it too.
+    await tick(5000); activity.updateTab(1, { status: 'loading' }, { ...currentTab(), status: 'loading' }); expect(row()).toMatchObject({ state: 'unknown', stateSince: now });
+    activity.updateTab(1, { status: 'complete' }, currentTab()); await tick(1000); expect(row()).toMatchObject({ state: 'working', stateSince: now });
+    await tick(3000); activity = new WebActivity(access); activity.start(); await tick(); expect(row()).toMatchObject({ state: 'working', stateSince: now });
+    // Bounded, non-content metadata: one number on the monotonic clock.
+    expect(Object.keys(row()).sort()).toEqual(['id', 'observedAt', 'provenance', 'provider', 'state', 'stateSince', 'tabId', 'validUntil', 'windowId']);
   });
   it('expires strictly using monotonic epoch even if wall clock moves backwards', async () => {
     activity.start(); await tick(); now += ACTIVITY_TTL; expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'expired' });

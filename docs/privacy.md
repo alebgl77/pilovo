@@ -8,7 +8,7 @@ After you grant access to a provider individually, Pilovo dynamically registers 
 
 Pilovo does not collect full conversations, prompt or response text, tab titles, screenshots, account cookies, credentials, tokens or passwords. No whole-page text is read. Dedicated generic status labels may be matched locally; conversation content is not included in observer messages. Navigation uses tab identity and validates the permitted provider origin; conversation URLs are not retained as activity history.
 
-Activity consists of temporary provider/tab/window identities, observed state, local observation/freshness times, attention reason, the attention's raise time on a local monotonic clock and local seen acknowledgment. It stays in session memory, without durable activity history or activity export. Restart requires fresh evidence. It does not inspect other extensions or native applications. An open tab does not prove authentication or active work.
+Activity consists of temporary provider/tab/window identities, observed state, local observation/freshness times, attention reason, the attention's raise time and the current state's start time on a local monotonic clock, and local seen acknowledgment. It stays in session memory, without durable activity history or activity export. The panel derives an elapsed duration from the state's start time (unreleased); it is computed in memory, never saved, exported or sent, and restarts when evidence is lost. Restart requires fresh evidence. It does not inspect other extensions or native applications. An open tab does not prove authentication or active work.
 
 Removing site access invalidates observations and stops authorization renewals. An observer lease expires logically within 15 seconds, including when a worker restart or missed event prevents immediate cleanup. A throttled/suspended document may run the cleanup callback later, but cannot use an expired lease to continue authorized sampling. Stale evidence becomes unknown. Chrome's background scheduling makes toolbar-badge cleanup best effort, not an exact real-time guarantee.
 
@@ -20,7 +20,7 @@ Historical receipts may contain previously supplied title, summary, prompt, link
 
 | Data | Location and control |
 | --- | --- |
-| Current activity and seen acknowledgment | Ephemeral session memory; invalidated by revocation/restart and evidence expiry |
+| Current activity, elapsed durations and seen acknowledgment | Ephemeral session memory; invalidated by revocation/restart and evidence expiry; durations restart when evidence is lost |
 | Preparations, notes, retained prompts, missions and historical receipts | IndexedDB in your Chrome profile; deletion, retention and purge controls |
 | Preferences | Local extension storage; preserved by history purge |
 | Historical anti-replay identities | Minimal deleted-attempt identifiers without their content; preserved by purge |

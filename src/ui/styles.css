@@ -549,6 +549,7 @@ summary svg { margin-right: 5px; }
 .activity-row h3 { font-size: 14px; font-weight: 600; letter-spacing: -.15px; }
 .activity-row-content > p { color: var(--muted); font-size: 13px; margin-top: 5px; }
 .needs-attention .activity-row-content > p { color: var(--ink); }
+.activity-row-content > p.activity-elapsed { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 4px; }
 .activity-observed { display: flex; flex-wrap: wrap; gap: 3px 6px; color: var(--muted); font-size: 11px; line-height: 1.6; margin-top: 9px; }
 .activity-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 170px; }
 .activity-row-actions .button { font-size: 12px; min-height: 36px; }

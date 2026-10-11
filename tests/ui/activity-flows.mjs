@@ -14,6 +14,10 @@ const pass = name => { report.checks.push(name); process.stdout.write(`PASS ${na
 const row = id => page.locator(`[data-activity-id="${id}"]`);
 const audit = async name => { await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))); await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {})))); const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze(); report.accessibility.push({ name, violations: result.violations.map(({ id, impact, nodes }) => ({ id, impact, targets: nodes.map(node => node.target) })) }); expect(result.violations).toEqual([]); };
 const overflow = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('.page-scroll')].every(element => element.scrollWidth <= element.clientWidth + 1))).toBe(true);
+const elapsed = id => row(id).locator('.activity-elapsed');
+const minuteTicker = () => page.evaluate(() => window.__activity.timers().filter(delay => delay <= 15_000));
+// Elapsed durations are plain row text: never in a live region, and each fits its row without clipping or overflow.
+const quietDurations = async () => expect(await page.evaluate(() => [...document.querySelectorAll('.activity-elapsed')].map(element => !element.closest('[aria-live], [role="status"], [role="alert"], [role="log"], [role="timer"]') && element.scrollWidth <= element.clientWidth + 1 && element.getBoundingClientRect().right <= innerWidth))).toEqual(expect.not.arrayContaining([false]));
 const screenshot = async name => { await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); document.querySelector('.activity-page')?.scrollTo(0, 0); }); const file = `Pilovo_${name}_synthetic.png`; await page.screenshot({ path: path.join(captures, file), fullPage: true }); await copyFile(path.join(captures, file), path.join(media, file)); };
 try {
   await page.goto(`${base}/tests/ui/activity-harness.html?loading`);
@@ -45,6 +49,10 @@ try {
   await expect(row('idle')).toContainText('En attente');
   await expect(row('unsupported')).toContainText('signal d’activité reconnu');
   await expect(row('unsupported').getByRole('button', { name: 'Ouvrir la session' })).toBeDisabled();
+  await expect(elapsed('working')).toHaveText('En cours depuis 4 min');
+  await expect(elapsed('attention')).toHaveText('Réponse disponible depuis 2 min');
+  await expect(elapsed('idle')).toHaveCount(0); await expect(elapsed('unsupported')).toHaveCount(0);
+  await quietDurations();
   await expect(page.locator('.activity-semantics')).toContainText('votre tâche peut encore demander du travail');
   await expect(page.getByRole('button', { name: /^(Arrêter|Pause|Terminer)$/ })).toHaveCount(0);
   await audit('activity-desktop-light'); await overflow(); await screenshot('activity_desktop');
@@ -61,9 +69,10 @@ try {
   await row('attention').getByRole('button', { name: 'Marquer comme vu' }).click();
   await expect(row('attention').locator('.activity-state')).toHaveText('Vu');
   await expect(row('attention')).toContainText('Réponse disponible');
+  await expect(elapsed('attention')).toHaveText('Réponse disponible depuis 2 min');
   await expect(page.locator('.activity-summary dd').first()).toHaveText('0');
   await expect(row('attention').getByRole('button', { name: 'Ouvrir la session' })).toBeFocused();
-  pass('attention ordering, unsupported state, response-ready semantics, ID-bound focus failure and confirmed event acknowledgement');
+  pass('attention ordering, unsupported state, response-ready semantics, elapsed durations for working and attention (seen or not) only, ID-bound focus failure and confirmed event acknowledgement');
 
   await page.evaluate(() => { window.__activity.seed(); window.__activity.holdAck(true); });
   await row('attention').getByRole('button', { name: 'Marquer comme vu' }).click();
@@ -73,6 +82,7 @@ try {
   expect(await page.evaluate(() => window.__activity.calls().ack.length)).toBe(beforeAck);
   await page.evaluate(() => window.__activity.nextAttention());
   await expect(row('attention')).toContainText('Une intervention est demandée');
+  await expect(elapsed('attention')).toHaveText('Intervention demandée depuis moins d’une minute');
   await page.evaluate(() => { window.__activity.holdAck(false); window.__activity.resolveAck(); });
   await expect(row('attention').getByRole('button', { name: 'Marquer comme vu' })).toBeEnabled();
   await expect(row('attention').locator('.activity-state')).toHaveText('À vérifier');
@@ -152,10 +162,13 @@ try {
   await expect(page.getByRole('alert')).toContainText('ne sont plus confirmées');
   await expect(page.locator('.activity-summary dd').first()).toHaveText('0');
   await expect(row('attention').locator('.activity-state')).toHaveText('Observation interrompue');
+  await expect(page.locator('.activity-elapsed')).toHaveCount(0);
   expect(await page.locator('body').innerText()).not.toContain('private transport diagnostic');
   await page.evaluate(() => window.__activity.fail(false));
   await expect(row('attention').locator('.activity-state')).toHaveText('À vérifier');
-  pass('latest request wins; failed reads downgrade all old data and never expose raw diagnostics');
+  // A panel-only interruption hides durations; the worker's continuous observation brings them back unchanged.
+  await expect(elapsed('attention')).toHaveText('Réponse disponible depuis 2 min'); await expect(elapsed('working')).toHaveText('En cours depuis 4 min');
+  pass('latest request wins; failed reads downgrade all old data, hide durations until confirmed again and never expose raw diagnostics');
 
   await page.evaluate(() => window.__activity.seed(700));
   await expect(row('attention').locator('.activity-state')).toHaveText('À vérifier');
@@ -165,7 +178,32 @@ try {
   await expect(row('attention').getByRole('button', { name: 'Ouvrir la session' })).toBeDisabled();
   await expect(row('attention').getByRole('button', { name: 'Marquer comme vu' })).toHaveCount(0);
   await expect(page.locator('.activity-summary dd').first()).toHaveText('0');
-  pass('local monotonic expiry removes live attention and disables actions even with a hung worker');
+  await expect(page.locator('.activity-elapsed')).toHaveCount(0);
+  pass('local monotonic expiry removes live attention, its duration and actions even with a hung worker');
+
+  await page.evaluate(() => { window.__activity.hold(false); window.__activity.seed(); window.__activity.since('working', 57_000); });
+  await expect(elapsed('working')).toHaveText('En cours depuis moins d’une minute');
+  const workingOpen = row('working').getByRole('button', { name: 'Ouvrir la session' });
+  await workingOpen.focus();
+  // A hidden page skips every read, so only the panel's local minute ticker can re-render the duration.
+  const frozen = await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); return { reads: window.__activity.calls().reads, text: document.querySelector('[data-activity-id="working"] .activity-elapsed')?.textContent }; });
+  expect(frozen.text).toBe('En cours depuis moins d’une minute');
+  await expect(elapsed('working')).toHaveText('En cours depuis 1 min', { timeout: 6000 });
+  expect(await page.evaluate(() => window.__activity.calls().reads)).toBe(frozen.reads);
+  await expect(workingOpen).toBeFocused();
+  await page.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); window.__activity.since('working', -5_000); });
+  await expect(elapsed('working')).toHaveCount(0);
+  await expect(row('working')).toContainText('Une réponse est en cours de génération');
+  await page.evaluate(() => window.__activity.since('working', 61 * 60_000));
+  await expect(elapsed('working')).toHaveText('En cours depuis 1 h 01');
+  // The minute ticker (at most 15 s) is armed only while a row shows a duration; the 60 s expiry timer is separate and stays.
+  await expect.poll(minuteTicker).not.toEqual([]);
+  await page.evaluate(() => window.__activity.settle());
+  await expect(row('working')).toContainText('En attente'); await expect(page.locator('.activity-row')).toHaveCount(4);
+  await expect(page.locator('.activity-elapsed')).toHaveCount(0);
+  await expect.poll(minuteTicker).toEqual([]);
+  expect((await page.evaluate(() => window.__activity.timers())).some(delay => delay > 15_000)).toBe(true);
+  pass('elapsed duration advances at the minute boundary by a local ticker without any read, keeps keyboard focus; a future start shows nothing; no ticker without a shown duration');
 
   await page.evaluate(() => { window.__activity.hold(false); window.__activity.seed(); });
   await expect(row('attention').locator('.activity-state')).toHaveText('À vérifier');
@@ -184,25 +222,35 @@ try {
   await page.setViewportSize({ width: 360, height: 900 });
   await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
   await expect(row('attention')).toContainText('Response available');
-  await audit('activity-360-dark-English'); await overflow(); await screenshot('activity_360_dark');
+  await expect(elapsed('working')).toHaveText('Working for 4 min'); await expect(elapsed('attention')).toHaveText('Available for 2 min');
+  await expect(elapsed('idle')).toHaveCount(0); await expect(elapsed('unsupported')).toHaveCount(0);
+  await audit('activity-360-dark-English'); await overflow(); await quietDurations(); await screenshot('activity_360_dark');
   await page.evaluate(() => window.__activity.addAttention());
   await expect(page.getByRole('button', { name: 'Mark all as seen', exact: true })).toBeVisible();
   await expect(page.locator('.activity-shortcut')).toHaveText('Next item to review: Alt+Shift+J');
-  await audit('activity-360-dark-English-mark-all'); await overflow();
+  await expect(elapsed('attention-2')).toHaveText('Input requested for under a minute');
+  await page.evaluate(() => window.__activity.since('attention-2', 65 * 60_000 + 30_000, 'error_visible'));
+  await expect(elapsed('attention-2')).toHaveText('Error visible for 1 h 05 min');
+  await audit('activity-360-dark-English-mark-all'); await overflow(); await quietDurations();
   await page.evaluate(() => window.__activity.settings({ language: 'fr', theme: 'light' }));
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light'); await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
   await expect(page.getByRole('button', { name: 'Tout marquer comme vu', exact: true })).toBeVisible();
-  await audit('activity-360-light-French'); await overflow();
+  await expect(elapsed('attention-2')).toHaveText('Erreur visible depuis 1 h 05'); await expect(elapsed('working')).toHaveText('En cours depuis 4 min');
+  await page.evaluate(() => window.__activity.since('attention', 30_000));
+  await expect(elapsed('attention')).toHaveText('Réponse disponible depuis moins d’une minute');
+  await audit('activity-360-light-French'); await overflow(); await quietDurations();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   expect(await page.locator('.button').first().evaluate(element => getComputedStyle(element).transitionDuration)).toBe('0s');
   await page.evaluate(() => window.__activity.noShortcuts());
   await expect(page.locator('.activity-shortcut')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Tout marquer comme vu', exact: true })).toBeVisible();
-  pass('French/English, 360px light/dark, mark all and shortcut hint, reduced motion, no overflow and zero axe violations; hint hidden without shortcut access');
+  pass('French/English, 360px light/dark, elapsed durations, mark all and shortcut hint, reduced motion, no overflow and zero axe violations; hint hidden without shortcut access');
 
   await page.evaluate(() => { window.__activity.hold(true); window.__activity.signal(); });
   const unmountRequest = await page.evaluate(() => window.__activity.pending() - 1);
-  await page.evaluate(() => window.__activity.unmount());
+  // Durations are shown, so the minute ticker is armed; unmounting clears it and the expiry timer.
+  await expect.poll(minuteTicker).not.toEqual([]);
+  expect(await page.evaluate(() => { window.__activity.unmount(); return window.__activity.timers(); })).toEqual([]);
   expect(await page.evaluate(() => window.__activity.listeners())).toBe(0);
   await page.evaluate(index => window.__activity.resolve(index), unmountRequest);
   await expect(page.locator('#root')).toBeEmpty();

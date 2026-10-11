@@ -16,7 +16,7 @@ Node.js, Python, a CLI and a native companion are unnecessary to use the ZIP. Th
 
 Enable ChatGPT or Claude from Pilovo. The optional site grant applies to that provider only; you can grant the other later. Open its web app and send your own prompt. Pilovo observes supported status controls without collecting the conversation.
 
-Working requires recognized evidence. Response ready requires witnessed work followed by stable ready evidence. Unknown means evidence is absent, inaccessible, stale or not supported by the current adapter; it does not mean the agent stopped. Use focus to inspect the provider directly. Marking an attention item seen only acknowledges it locally.
+Working requires recognized evidence. Response ready requires witnessed work followed by stable ready evidence. Unknown means evidence is absent, inaccessible, stale or not supported by the current adapter; it does not mean the agent stopped. Use focus to inspect the provider directly. Marking an attention item seen only acknowledges it locally. Unreleased source also shows how long a row has been working or showing an item to review, seen or not; that duration restarts whenever evidence is lost, for example after expiry, navigation or a restart.
 
 Remove a site's access through Pilovo or Chrome's extension controls. Revocation invalidates observations and stops renewals; a local lease expires within 15 seconds logically. A suspended page may execute its cleanup later. The toolbar badge is last-observed attention, with best-effort expiry. It is not an OS notification.
 
@@ -58,7 +58,7 @@ Uninstall removes extension storage. Exports, backups, clipboard, provider conve
 3. Choisissez le dossier contenant `manifest.json`, épinglez Pilovo et ouvrez son panneau.
 4. Activez **un fournisseur** : ChatGPT et Claude demandent chacun une autorisation distincte. Un refus laisse l'ouverture du site officiel disponible.
 5. Envoyez une consigne dans votre compte fournisseur. Pilovo indique l'état seulement si un signal compatible est observé.
-6. Si l'état est **Inconnu**, rejoignez l'onglet : la preuve peut manquer, expirer, être ralentie en arrière-plan ou correspondre à une interface non reconnue. Ne l'interprétez pas comme une fin.
+6. Si l'état est **Inconnu**, rejoignez l'onglet : la preuve peut manquer, expirer, être ralentie en arrière-plan ou correspondre à une interface non reconnue. Ne l'interprétez pas comme une fin. Depuis les sources (non publié), une durée indique depuis quand une ligne est en cours ou signale un élément à vérifier, vu ou non ; elle repart de zéro dès que la preuve est perdue.
 7. Retirez l'accès de chaque site depuis Pilovo ou Chrome quand vous le souhaitez.
 8. Raccourcis (non publiés, depuis les sources) : `Alt+Maj+J` rejoint le prochain élément à vérifier, ou ouvre le panneau s'il n'y a rien à vérifier. Pour le modifier, ou attribuer une touche à **Marquer tous les éléments à vérifier comme vus**, ouvrez `chrome://extensions/shortcuts`.
 

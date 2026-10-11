@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from '../../src/ui/App';
 import { client } from '../../src/platform/client';
 import { DEFAULT_SETTINGS } from '../../src/shared/defaults';
-import { monotonicEpoch, type ActivityShortcuts, type WebActivityObservation, type WebActivitySnapshot } from '../../src/shared/activity';
+import { monotonicEpoch, type ActivityShortcuts, type WebActivityObservation, type WebActivitySnapshot, type WebAttentionReason } from '../../src/shared/activity';
 import { emptyWebDiscovery, type WebProvider } from '../../src/shared/web';
 import type { HubClient, Snapshot } from '../../src/shared/types';
 import '../../src/ui/styles.css';
@@ -16,15 +16,24 @@ const pending: { resolve: (value: WebActivitySnapshot) => void; value: WebActivi
 let pendingAck: (() => void) | undefined, pendingAckAll: (() => void) | undefined;
 const snapshot: Snapshot = { mode: 'extension', bridgeStatus: 'disabled', connectors: [], settings: { ...DEFAULT_SETTINGS, language: 'fr', theme: 'light' }, missions: [], tasks: [], webPreparations: [], diagnostics: { acceptedEvents: 0, duplicateEvents: 0, rejectedEvents: 0 } };
 const signal = () => listeners.forEach(listener => listener());
+// Pending window timeouts and their delays, so flows can check when the panel arms its tickers and that it clears them.
+const timers = new Map<number, number>(), setTimer = window.setTimeout.bind(window), clearTimer = window.clearTimeout.bind(window);
+window.setTimeout = ((handler: TimerHandler, delay = 0, ...args: unknown[]) => {
+  const id = setTimer((...values: unknown[]) => { timers.delete(id); if (typeof handler === 'function') handler(...values); }, delay, ...args);
+  timers.set(id, delay); return id;
+}) as typeof window.setTimeout;
+window.clearTimeout = (id?: number) => { if (id !== undefined) timers.delete(id); clearTimer(id); };
 const sample = (): WebActivitySnapshot => ({ availability: 'available', observations: structuredClone(records), observedAt: Date.now() });
 const seed = (ttl = 60000) => {
   grants.add('claude-web'); grants.add('chatgpt-web');
-  const common = { windowId: 1, provenance: 'observed_ui' as const, observedAt: Date.now(), validUntil: monotonicEpoch() + ttl };
+  const now = monotonicEpoch(), common = { windowId: 1, provenance: 'observed_ui' as const, observedAt: Date.now(), validUntil: now + ttl };
+  // Synthetic elapsed times on the monotonic clock: working for 4 min, response available for 2 min (stateSince = raisedAt).
+  const raised = now - 130_000;
   records = [
-    { ...common, id: 'idle', provider: 'claude-web', tabId: 9, state: 'idle' },
-    { ...common, id: 'working', provider: 'chatgpt-web', tabId: 11, state: 'working' },
-    { ...common, id: 'attention', provider: 'chatgpt-web', tabId: 12, state: 'attention', attention: { id: 'event-a', reason: 'response_ready', acknowledged: false, raisedAt: monotonicEpoch() - 2000 } },
-    { ...common, id: 'unsupported', provider: 'claude-web', tabId: 14, state: 'unknown', unknownReason: 'no_evidence' },
+    { ...common, id: 'idle', provider: 'claude-web', tabId: 9, state: 'idle', stateSince: now - 30_000 },
+    { ...common, id: 'working', provider: 'chatgpt-web', tabId: 11, state: 'working', stateSince: now - 245_000 },
+    { ...common, id: 'attention', provider: 'chatgpt-web', tabId: 12, state: 'attention', stateSince: raised, attention: { id: 'event-a', reason: 'response_ready', acknowledged: false, raisedAt: raised } },
+    { ...common, id: 'unsupported', provider: 'claude-web', tabId: 14, state: 'unknown', stateSince: now - 10_000, unknownReason: 'no_evidence' },
   ];
   signal();
 };
@@ -65,14 +74,24 @@ Object.assign(window, { __activity: {
   hold: (value: boolean) => { hold = value; }, pending: () => pending.length,
   resolve: (index: number) => pending[index].resolve(pending[index].value),
   holdAck: (value: boolean) => { holdAck = value; }, resolveAck: () => pendingAck?.(),
-  nextAttention: () => { const record = records.find(record => record.id === 'attention'); if (record) { record.attention = { id: 'event-b', reason: 'input_required', acknowledged: false, raisedAt: monotonicEpoch() }; signal(); } },
-  addAttention: () => { const base = records.find(record => record.id === 'attention'); if (base) { records.push({ ...structuredClone(base), id: 'attention-2', provider: 'claude-web', tabId: 15, attention: { id: 'event-c', reason: 'input_required', acknowledged: false, raisedAt: monotonicEpoch() - 1000 } }); signal(); } },
+  nextAttention: () => { const record = records.find(record => record.id === 'attention'); if (record) { record.stateSince = monotonicEpoch(); record.attention = { id: 'event-b', reason: 'input_required', acknowledged: false, raisedAt: record.stateSince }; signal(); } },
+  addAttention: () => { const base = records.find(record => record.id === 'attention'), raisedAt = monotonicEpoch() - 1000; if (base) { records.push({ ...structuredClone(base), id: 'attention-2', provider: 'claude-web', tabId: 15, stateSince: raisedAt, attention: { id: 'event-c', reason: 'input_required', acknowledged: false, raisedAt } }); signal(); } },
+  // The displayed state began `ago` ms before now (negative: a future start, as with clock skew). A reason raises a new attention identity.
+  since: (id: string, ago: number, reason?: WebAttentionReason) => {
+    const record = records.find(record => record.id === id); if (!record) return;
+    record.stateSince = monotonicEpoch() - ago;
+    if (reason) { record.state = 'attention'; record.attention = { id: `event-${id}-${reason}`, reason, acknowledged: false, raisedAt: record.stateSince }; } else if (record.attention) record.attention.raisedAt = record.stateSince;
+    signal();
+  },
   failAckAll: (value: boolean) => { ackAllFailure = value; },
   holdAckAll: (value: boolean) => { holdAckAll = value; }, resolveAckAll: () => pendingAckAll?.(),
   shortcut: (value: string | null) => { shortcuts = value === null ? {} : { 'focus-next-attention': value }; signal(); },
   noShortcuts: () => { delete api.getShortcuts; signal(); },
   failShortcuts: (value: boolean) => { shortcutFailure = value; signal(); },
   empty: () => { records = []; signal(); },
+  // Rows stay listed but none shows a duration: working and attention become idle.
+  settle: () => { for (const record of records) if (record.state === 'working' || record.state === 'attention') { record.state = 'idle'; delete record.attention; } signal(); },
+  timers: () => [...timers.values()],
   unmount: () => root.unmount(), settings: (patch: Parameters<HubClient['updateSettings']>[0]) => api.updateSettings(patch),
 } });
 root.render(<App api={api} />);

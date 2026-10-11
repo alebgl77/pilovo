@@ -10,6 +10,7 @@ Dated 10 October 2026. This pilot observes a bounded set of web UI controls. Pro
 | Explicit attention/error | Conditional | Only recognized, bounded UI indicators; unfamiliar notices remain unknown. No general account, quota or error understanding is claimed. |
 | Focus / mark seen | Preview feature | Focus targets the matched tab. Seen is a local acknowledgment, never verification or provider approval. |
 | Keyboard shortcuts / mark all as seen | Unreleased | The next-item shortcut reuses focus revalidation and skips an item the fresh sample no longer shows as needing review; mark all is local seen only. Command handling is unit-tested with mocked Chrome APIs; real key dispatch, macOS keys and conflicting extension shortcuts are not yet checked manually. |
+| Elapsed durations | Unreleased | Derived in the panel from the observed state's start; minute precision. They restart whenever evidence is lost (throttled or expired evidence, navigation, worker restart), so they can be shorter than the real time and are not provider generation times. Covered by unit tests and synthetic harness flows only. |
 | Toolbar badge | Best effort | Last observed unacknowledged attention; service-worker suspension can delay visual expiry. |
 | ChatGPT agent / Claude in Chrome | Not supported as dedicated integrations | Ordinary web indicators do not prove internal agent tasks, remote-browser state or extension state. |
 | Claude Code / Codex / native applications | Not supported | No live connector or external-process control is bundled. |

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Check, Circle, CircleAlert, Eye, LoaderCircle, RefreshCw, Unplug } from 'lucide-react';
 import { monotonicEpoch, type ActivityShortcuts, type WebActivityObservation, type WebActivitySnapshot } from '../shared/activity';
 import type { HubClient } from '../shared/types';
-import { currentObservations, needsAttention, shortcutLabel } from './activityModel';
+import { currentObservations, formatElapsed, needsAttention, nextElapsedTick, shortcutLabel, stateElapsed } from './activityModel';
 import { ProviderConnections, providerName, useWebServices } from './WebServices';
 import { useObservedResource } from './useObservedResource';
 
@@ -32,6 +32,14 @@ export function WebActivity({ api, en }: { api: HubClient; en: boolean }) {
     const deadlines = (activity.data?.observations || []).map(record => record.validUntil).filter(value => Number.isFinite(value) && value > now);
     if (!deadlines.length) return;
     const timer = window.setTimeout(() => tick(value => value + 1), Math.max(1, Math.min(...deadlines) - now + 1));
+    return () => window.clearTimeout(timer);
+  });
+  useEffect(() => {
+    // Shown durations change at minute boundaries: re-render for the nearest one (at most every 15 s), only while one is shown.
+    // Re-rendering keeps the same nodes, so keyboard focus stays put; the text is never announced.
+    const wait = loading ? undefined : nextElapsedTick(rows, monotonicEpoch());
+    if (wait === undefined) return;
+    const timer = window.setTimeout(() => tick(value => value + 1), wait);
     return () => window.clearTimeout(timer);
   });
   const refresh = () => { void activity.refresh(); void service.refresh(); };
@@ -75,7 +83,7 @@ export function WebActivity({ api, en }: { api: HubClient; en: boolean }) {
       </div>
       {bulk === 'error' && <p className="activity-bulk-error" role="alert">{en ? 'These signals could not be marked as seen. They may have changed; refresh activity.' : 'Ces signaux n’ont pas pu être marqués comme vus. Ils ont peut-être changé ; actualisez l’activité.'}</p>}
       <section className="activity-sessions" aria-labelledby="sessions-heading"><div className="activity-list-heading"><h2 id="sessions-heading">{en ? 'Sessions' : 'Sessions'}</h2><span>{en ? 'Attention first' : 'Votre attention d’abord'}</span></div>
-        <ul ref={list} className="activity-list">{rows.map(record => <ActivityRow key={record.id} record={record} sessionNumber={sessionNumbers.get(record.id)!} api={api} en={en} refresh={activity.refresh} />)}</ul>
+        <ul ref={list} className="activity-list">{rows.map(record => <ActivityRow key={record.id} record={record} sessionNumber={sessionNumbers.get(record.id)!} now={now} api={api} en={en} refresh={activity.refresh} />)}</ul>
       </section>
       <p className="activity-semantics">{en ? '“Response available” means generation has ended. Review the answer in the service; your task may still need work.' : '« Réponse disponible » signifie que la génération s’est arrêtée. Vérifiez la réponse dans le service ; votre tâche peut encore demander du travail.'}</p>
     </> : <div className="activity-empty">
@@ -99,7 +107,15 @@ function reasonText(record: WebActivityObservation, en: boolean) {
   return ({ response_ready: en ? 'Response available' : 'Réponse disponible', input_required: en ? 'Your input is requested' : 'Une intervention est demandée', error_visible: en ? 'An error is visible in the page' : 'Une erreur est visible dans la page' })[record.attention?.reason || 'response_ready'];
 }
 
-function ActivityRow({ record, sessionNumber, api, en, refresh }: { record: WebActivityObservation; sessionNumber: number; api: HubClient; en: boolean; refresh: () => Promise<void> }) {
+/** Ephemeral, derived in the panel only; nothing for idle/unknown rows or an unusable clock reading. Seen attention keeps its duration. */
+function elapsedText(record: WebActivityObservation, now: number, en: boolean) {
+  const value = formatElapsed(stateElapsed(record, now), en);
+  if (!value) return undefined;
+  if (record.state === 'working') return en ? `Working for ${value}` : `En cours depuis ${value}`;
+  return ({ response_ready: en ? `Available for ${value}` : `Réponse disponible depuis ${value}`, input_required: en ? `Input requested for ${value}` : `Intervention demandée depuis ${value}`, error_visible: en ? `Error visible for ${value}` : `Erreur visible depuis ${value}` })[record.attention?.reason || 'response_ready'];
+}
+
+function ActivityRow({ record, sessionNumber, now, api, en, refresh }: { record: WebActivityObservation; sessionNumber: number; now: number; api: HubClient; en: boolean; refresh: () => Promise<void> }) {
   const [pending, setPending] = useState<'focus' | 'ack' | null>(null), [error, setError] = useState<'focus' | 'ack' | null>(null);
   const lock = useRef(false), mounted = useRef(false), event = useRef(record.attention?.id);
   const openButton = useRef<HTMLButtonElement>(null), seenButton = useRef<HTMLButtonElement>(null), latest = useRef(record);
@@ -123,11 +139,11 @@ function ActivityRow({ record, sessionNumber, api, en, refresh }: { record: WebA
   const state = record.state, seen = state === 'attention' && record.attention?.acknowledged;
   const Icon = state === 'working' ? LoaderCircle : state === 'unknown' ? Unplug : state === 'attention' ? seen ? Check : CircleAlert : Circle;
   const label = ({ unknown: en ? 'Observation interrupted' : 'Observation interrompue', idle: en ? 'Waiting' : 'En attente', working: en ? 'Working' : 'En cours', attention: seen ? en ? 'Seen' : 'Vu' : en ? 'To review' : 'À vérifier' })[state];
-  const observed = new Date(record.observedAt);
+  const observed = new Date(record.observedAt), elapsed = elapsedText(record, now, en);
   const dateValid = Number.isFinite(observed.getTime());
   return <li className={`activity-row activity-${state}${needsAttention(record) ? ' needs-attention' : ''}`} data-activity-id={record.id}>
     <div className="activity-state"><Icon size={17} aria-hidden="true" /><span>{label}</span></div>
-    <div className="activity-row-content"><h3>{providerName(record.provider)} · session {sessionNumber}</h3><p>{reasonText(record, en)}</p><div className="activity-observed"><span title={en ? 'Observed in the page. No conversation content is collected.' : 'Observé dans la page. Aucun contenu de conversation n’est collecté.'}>{en ? 'Observed in the page' : 'Observé dans la page'}</span><span>·</span>{dateValid ? <time dateTime={observed.toISOString()} title={observed.toLocaleString(en ? 'en-GB' : 'fr-FR')}>{en ? 'Last seen' : 'Dernière observation'} {observed.toLocaleTimeString(en ? 'en-GB' : 'fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time> : <span>{en ? 'Observation time unavailable' : 'Heure d’observation indisponible'}</span>}</div></div>
+    <div className="activity-row-content"><h3>{providerName(record.provider)} · session {sessionNumber}</h3><p>{reasonText(record, en)}</p>{elapsed && <p className="activity-elapsed">{elapsed}</p>}<div className="activity-observed"><span title={en ? 'Observed in the page. No conversation content is collected.' : 'Observé dans la page. Aucun contenu de conversation n’est collecté.'}>{en ? 'Observed in the page' : 'Observé dans la page'}</span><span>·</span>{dateValid ? <time dateTime={observed.toISOString()} title={observed.toLocaleString(en ? 'en-GB' : 'fr-FR')}>{en ? 'Last seen' : 'Dernière observation'} {observed.toLocaleTimeString(en ? 'en-GB' : 'fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time> : <span>{en ? 'Observation time unavailable' : 'Heure d’observation indisponible'}</span>}</div></div>
     <div className="activity-row-actions"><button ref={openButton} className="button subtle" disabled={Boolean(pending) || state === 'unknown' || !api.focusWebActivity} onClick={() => { void action('focus'); }}>{pending === 'focus' ? en ? 'Opening…' : 'Ouverture…' : en ? 'Open session' : 'Ouvrir la session'}<ArrowUpRight size={14} aria-hidden="true" /></button>{needsAttention(record) && <button ref={seenButton} className="button" disabled={Boolean(pending) || !api.acknowledgeWebActivity} onClick={() => { void action('ack'); }}>{pending === 'ack' ? en ? 'Saving…' : 'Enregistrement…' : en ? 'Mark as seen' : 'Marquer comme vu'}</button>}</div>
     {error && <p className="activity-row-error" role="alert">{error === 'focus' ? en ? 'This session could not be opened. Refresh activity or open the service.' : 'Cette session n’a pas pu être ouverte. Actualisez l’activité ou ouvrez le service.' : en ? 'This signal could not be marked as seen. It may have changed; refresh activity.' : 'Ce signal n’a pas pu être marqué comme vu. Il a peut-être changé ; actualisez l’activité.'}</p>}
   </li>;
