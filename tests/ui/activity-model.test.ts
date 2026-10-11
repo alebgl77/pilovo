@@ -93,13 +93,15 @@ describe('ephemeral elapsed durations', () => {
 
 describe('stable session identity in rows', () => {
   const nb = '\u00a0';
-  it('heads a row with the worker number, or with the user label and the provider as secondary text', () => {
-    expect(sessionHeading(record({ sessionNumber: 3 }))).toEqual({ text: 'Claude · session 3', session: 'Claude · session 3', provider: 'Claude' });
+  it('heads a row with the worker number, or with the user label and the numbered provider as secondary text', () => {
+    expect(sessionHeading(record({ sessionNumber: 3 }))).toEqual({ text: 'Claude · session 3', session: 'Claude · session 3', secondary: 'Claude · session 3' });
     expect(sessionHeading(record({ provider: 'chatgpt-web', sessionNumber: 1 })).text).toBe('ChatGPT · session 1');
-    // The numbered form stays available to name the rename field, which edits the label itself.
-    expect(sessionHeading(record({ sessionNumber: 3, label: 'Revue contrat' }))).toEqual({ text: 'Revue contrat — Claude', session: 'Claude · session 3', provider: 'Claude', label: 'Revue contrat' });
+    // A named row keeps its number, the only link to its OS notifications (which never carry the label); the numbered form
+    // also names the rename field, which edits the label itself.
+    expect(sessionHeading(record({ sessionNumber: 3, label: 'Revue contrat' }))).toEqual({ text: 'Revue contrat — Claude · session 3', session: 'Claude · session 3', secondary: 'Claude · session 3', label: 'Revue contrat' });
     // The number comes from the worker as is: never recomputed from other rows, and left out when malformed.
     for (const sessionNumber of [0, -1, 1.5, NaN, undefined, '2']) expect(sessionHeading(record({ sessionNumber: sessionNumber as number })).text).toBe('Claude · session');
+    expect(sessionHeading(record({ sessionNumber: 0, label: 'Revue contrat' })).text).toBe('Revue contrat — Claude');
     for (const label of ['', '   ', undefined, 42]) expect(sessionHeading(record({ sessionNumber: 2, label: label as string })).text).toBe('Claude · session 2');
     // Markup-like text is plain text here; the row renders it as a text node only.
     expect(sessionHeading(record({ label: '<b>x</b>' })).label).toBe('<b>x</b>');

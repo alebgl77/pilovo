@@ -1,10 +1,11 @@
-import { ACTIVITY_TTL, activityHintSchema, activityLabelSchema, activitySampleSchema, autoAcknowledgeSchema, monotonicEpoch, type ActivityLease, type AutoAcknowledgeSeconds, type WebActivityObservation, type WebActivitySnapshot } from '../shared/activity';
-import { WEB_PROVIDERS, type WebProvider } from '../shared/web';
+import { ACTIVITY_TTL, activityHintSchema, activityLabelSchema, activitySampleSchema, autoAcknowledgeSchema, monotonicEpoch, type ActivityLease, type AutoAcknowledgeSeconds, type WebActivityObservation, type WebActivitySnapshot, type WebAttentionReason } from '../shared/activity';
+import { notifyProvidersSchema, WEB_PROVIDERS, type WebProvider } from '../shared/web';
 import { HubError } from '../shared/errors';
 import { eligibleWebTab, matchesWebProvider, type WebTab } from '../platform/web';
 import { makeUnknown, newActivityRecord, reduceActivity, type ActivityRecord } from './activity-reducer';
 import { disposeInstalledController, sampleInstalledController } from './activity-injection';
 import { activityBadge, activityLanguage, sameBadge, type ActivityBadge, type ActivityLanguage } from './activity-badge';
+import { activityNotice, isNoticeId, NOTICE_GRACE, NOTICE_LIMIT, NOTICE_RESAMPLE, noticeId, NOTIFIED_LIMIT, NOTIFICATION_PERMISSION, parseNoticeId, remember, type ActivityNotice } from './activity-notifications';
 
 export interface ActivityAccess {
   runtimeId: string;
@@ -20,6 +21,13 @@ export interface ActivityAccess {
   badge(badge: ActivityBadge): Promise<void>;
   /** The active tab of Chrome's focused window, or undefined when no browser window has focus. IDs only, no page access. */
   viewing(): Promise<ActivityView | undefined>;
+  /** Optional OS notifications: whether Chrome currently grants the optional notifications permission. */
+  canNotify(): Promise<boolean>;
+  showNotification(id: string, notice: ActivityNotice): Promise<void>;
+  clearNotification(id: string): Promise<void>;
+  /** IDs of this extension's notifications still shown, including any a previous worker life left. */
+  shownNotifications(): Promise<string[]>;
+  /** Tells open panels that something changed (hub.changed); unrelated to OS notifications. */
   notify(): void;
   now(): number; wall(): number;
 }
@@ -37,6 +45,10 @@ interface Label { provider: WebProvider; text: string }
 export interface ActivityView { tabId: number; windowId: number }
 // Optional automatic seen: one timer, for the viewed tab only, bound to one attention identity of one record and grant.
 interface Dwell { tabId: number; windowId: number; record: ActivityRecord; identity: string; attentionId: string; grantId: string; timer: ReturnType<typeof setTimeout> }
+// An OS notification for one attention identity of one record and grant, shown while that attention stays current. When only
+// its evidence lapses, it waits until lapsedUntil for the same reason to be raised again in its tab, then stands for that
+// new identity: its ID, text and Chrome notification stay as they are.
+interface Notice { id: string; tabId: number; provider: WebProvider; reason: WebAttentionReason; record: ActivityRecord; identity: string; attentionId: string; grantId: string; lapsedUntil?: number }
 const validIndex = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 const validView = (view: ActivityView | undefined): view is ActivityView => validIndex(view?.tabId) && validIndex(view?.windowId);
 
@@ -60,10 +72,22 @@ export class WebActivity {
   private view?: ActivityView;
   private views = 0;
   private dwelling?: Dwell;
-  // The first paint of each worker life clears a badge and title left by a previous one.
-  constructor(private readonly access: ActivityAccess) { this.paintBadge(); }
+  // Optional OS notifications: the opted-in services, the live notification of each tab, the attention identities already
+  // notified and, per tab, the reason last raised there since the tab last showed work or idle. A revision per service
+  // cancels checks still pending when its setting or the permission changes. Memory only.
+  private notifyProviders = new Set<WebProvider>();
+  private readonly notices = new Map<number, Notice>();
+  private readonly notified = new Set<string>();
+  private readonly repeats = new Map<number, { provider: WebProvider; reason: WebAttentionReason }>();
+  private readonly noticeRevisions = new Map<WebProvider, number>(WEB_PROVIDERS.map(provider => [provider.id, 0]));
+  private noticeQueue = Promise.resolve();
+  private graceTimer?: ReturnType<typeof setTimeout>;
+  // Checks re-run after every change, each until its condition holds or its deadline passes (see until()).
+  private readonly waiters = new Set<() => void>();
+  // The first paint of each worker life clears a badge and title left by a previous one, and its notifications too.
+  constructor(private readonly access: ActivityAccess) { this.paintBadge(); this.clearStaleNotices(); }
 
-  /** Follows the app's language setting (not the browser's). Only the toolbar title depends on it. */
+  /** Follows the app's language setting (not the browser's). Only the toolbar title and new notifications depend on it. */
   setLanguage(language: unknown) {
     const next = activityLanguage(language);
     if (next !== this.language) { this.language = next; this.paintBadge(); }
@@ -75,6 +99,54 @@ export class WebActivity {
     const parsed = autoAcknowledgeSchema.safeParse(seconds), next = parsed.success ? parsed.data : 0;
     if (next !== this.autoAcknowledge) { this.autoAcknowledge = next; this.viewChanged(); }
   }
+  /** Optional OS notifications, from the app's settings: the services to notify for; anything unexpected means none.
+   * Attention raised before a service is added is never notified; removing it clears its notifications. */
+  setNotifyProviders(providers: unknown) {
+    const parsed = notifyProvidersSchema.safeParse(providers), next = new Set<WebProvider>(parsed.success ? parsed.data : []);
+    let changed = false;
+    for (const { id } of WEB_PROVIDERS) if (next.has(id) !== this.notifyProviders.has(id)) { this.noticeRevisions.set(id, this.noticeRevisions.get(id)! + 1); changed = true; }
+    if (changed) { this.notifyProviders = next; this.syncNotices(); }
+  }
+  /** Chrome no longer grants the optional notifications permission: pending checks stop and every notification is
+   * forgotten. Chrome refuses notification calls once the permission is gone, so the clears attempted here can fail: the
+   * Settings page clears them first, through setNotifyProviders, before it removes the permission itself. */
+  notificationsRevoked() {
+    for (const { id } of WEB_PROVIDERS) this.noticeRevisions.set(id, this.noticeRevisions.get(id)! + 1);
+    for (const tabId of [...this.notices.keys()]) this.dismiss(tabId);
+  }
+  /** Chrome grants the permission again: notifications that a removal elsewhere left on screen can be cleared now. */
+  notificationsGranted() { this.clearStaleNotices(); }
+  /** Resolves once every create and clear requested so far has reached Chrome. */
+  noticesSettled(): Promise<void> { return this.noticeQueue; }
+  /** A click on a Pilovo notification runs the ordinary focus of the attention it stands for: a fresh sample must still
+   * show it, unacknowledged, in the same record. A notification whose evidence lapsed first has its tab sampled again: only
+   * the same reason raised there again within its grace period is focused. It is never a seen acknowledgment. The
+   * notification is cleared whether focus succeeds or not; an ID this worker could not have made is ignored. */
+  async notificationClicked(id: unknown): Promise<'focused' | 'failed' | 'ignored'> {
+    const parsed = parseNoticeId(id);
+    if (!parsed) return 'ignored';
+    // Evidence that expired just now first moves its notification into the grace period.
+    this.expire();
+    const tabId = this.noticeTab(id as string), notice = tabId === undefined ? undefined : this.notices.get(tabId);
+    if (tabId !== undefined) this.dismiss(tabId); else this.clearNotice(id as string);
+    try {
+      if (notice?.lapsedUntil !== undefined) {
+        this.schedule(notice.tabId, notice.provider);
+        await this.until(() => Boolean(this.continuation(notice)) || !this.lapsing(notice), NOTICE_RESAMPLE);
+        const record = this.continuation(notice);
+        if (!record) return 'failed';
+        await this.focus(record.observation.id, record.observation.attention!.id);
+      } else if (notice) await this.focus(notice.record.observation.id, notice.attentionId);
+      else await this.focus(parsed.observationId, parsed.attentionId);
+      return 'focused';
+    } catch { return 'failed'; }
+  }
+  /** Closed by the user, the system or a clear: forgotten, without another call to Chrome. */
+  notificationClosed(id: unknown) {
+    const tabId = typeof id === 'string' ? this.noticeTab(id) : undefined;
+    if (tabId !== undefined) this.notices.delete(tabId);
+  }
+
   /** Chrome's tab activation or window focus changed (windowId < 0: WINDOW_ID_NONE, Chrome lost focus). Any dwell stops
    * at once; while automatic seen is on, a fresh query then says which tab is viewed. Off, Chrome is never queried. */
   viewChanged(windowId?: number) {
@@ -182,7 +254,7 @@ export class WebActivity {
   // with the open tab unless the caller removes it.
   private release(tabId: number) {
     this.reset(tabId);
-    this.records.delete(tabId); this.slots.delete(tabId); this.sessions.delete(tabId);
+    this.records.delete(tabId); this.slots.delete(tabId); this.sessions.delete(tabId); this.repeats.delete(tabId);
     this.changed();
   }
   updateTab(tabId: number, change: { url?: string; status?: string; discarded?: boolean; frozen?: boolean }, tab?: WebTab) {
@@ -242,11 +314,14 @@ export class WebActivity {
       record.observation.windowId = tab.windowId;
       const session = this.session(tabId, provider);
       if (validIndex(tab.index)) session.index = tab.index;
+      const before = record.observation.attention?.id;
       reduceActivity(record, parsed.data.evidence, this.access.now(), this.access.wall(), lease.expiresAt);
       this.records.set(tabId, record);
       committed = true;
       if (record.idleSince !== undefined) slot.pending = true;
       this.changed();
+      const attention = record.observation.attention;
+      this.attended(tabId, record, attention && attention.id !== before ? attention.reason : undefined);
     };
     try {
       await Promise.race([work(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Sample timeout')), 2_000); })]);
@@ -414,6 +489,108 @@ export class WebActivity {
     // The fresh answer replaces the cached view: a dwell restarts only from what Chrome reports now.
     this.view = view; this.dwell();
   }
+  // After each committed sample. A raised reason is a new attention identity; observed work or idle ends the tab's run. An
+  // identity raised again with the same reason, in the same tab and service, with only unknown, failed or expired evidence
+  // since the previous one (a throttled background tab whose evidence lapsed) is the same condition again: not notified twice.
+  // A notification still in its grace period has already been rebound to it by syncNotices(), in changed().
+  private attended(tabId: number, record: ActivityRecord, raised?: WebAttentionReason) {
+    const { provider, state } = record.observation;
+    if (state === 'working' || state === 'idle') { this.repeats.delete(tabId); return; }
+    if (!raised) return;
+    const last = this.repeats.get(tabId);
+    this.repeats.set(tabId, { provider, reason: raised });
+    if (last?.provider !== provider || last.reason !== raised) this.raised(tabId, record);
+  }
+  // Notifies a new attention identity once, the moment it is raised: for an opted-in service, with Chrome's permission, and
+  // not while its tab is the one being viewed. The asynchronous checks are followed by a synchronous re-check of everything.
+  private raised(tabId: number, record: ActivityRecord) {
+    const { provider, attention } = record.observation;
+    if (!attention || !this.notifyProviders.has(provider) || this.notified.has(attention.id)) return;
+    const notice: Notice = { id: noticeId(record.observation.id, attention.id), tabId, provider, reason: attention.reason, record, identity: record.identity, attentionId: attention.id, grantId: this.grants.get(provider)!.id };
+    const revision = this.noticeRevisions.get(provider), current = () => this.noticeRevisions.get(provider) === revision && this.holds(notice);
+    void (async () => {
+      if (!await this.access.canNotify().catch(() => false) || !current()) return;
+      // The automatic seen source: the active tab of Chrome's focused window, IDs only. A failed query is not a view.
+      const view = await this.access.viewing().catch(() => undefined);
+      if (current() && !(validView(view) && view.tabId === tabId)) this.show(notice);
+    })();
+  }
+  // A notification stands for one attention identity: same record, unacknowledged and live, same grant, service opted in.
+  private holds(notice: Notice) {
+    const { record, tabId, provider } = notice, observation = record.observation, grant = this.grants.get(provider)!;
+    return this.records.get(tabId) === record && record.identity === notice.identity && observation.state === 'attention' && observation.attention?.id === notice.attentionId
+      && !observation.attention.acknowledged && observation.validUntil > this.access.now() && grant.enabled && grant.id === notice.grantId && this.notifyProviders.has(provider);
+  }
+  // One live notification per tab, replaced by a newer one; NOTICE_LIMIT in all, the oldest cleared first. Chrome calls are
+  // serialized so a clear never overtakes the creation it undoes.
+  private show(notice: Notice) {
+    const session = this.sessions.get(notice.tabId);
+    if (session?.provider !== notice.provider) return;
+    this.dismiss(notice.tabId);
+    while (this.notices.size >= NOTICE_LIMIT) this.dismiss(this.notices.keys().next().value!);
+    this.notices.set(notice.tabId, notice); remember(this.notified, notice.attentionId, NOTIFIED_LIMIT);
+    const content = activityNotice(notice.provider, notice.reason, session.number, this.language);
+    this.noticeQueue = this.noticeQueue.catch(() => undefined).then(() => this.access.showNotification(notice.id, content))
+      .catch(() => { if (this.notices.get(notice.tabId) === notice) this.notices.delete(notice.tabId); });
+  }
+  private dismiss(tabId: number) {
+    const notice = this.notices.get(tabId);
+    if (notice) { this.notices.delete(tabId); this.clearNotice(notice.id); }
+  }
+  private clearNotice(id: string) { this.noticeQueue = this.noticeQueue.catch(() => undefined).then(() => this.access.clearNotification(id)).catch(() => undefined); }
+  private noticeTab(id: string) { for (const [tabId, notice] of this.notices) if (notice.id === id) return tabId; return undefined; }
+  // The tab still belongs to the notification's service, grant and setting.
+  private noticeScope(notice: Notice) {
+    const grant = this.grants.get(notice.provider)!;
+    return grant.enabled && grant.id === notice.grantId && this.notifyProviders.has(notice.provider) && this.sessions.get(notice.tabId)?.provider === notice.provider;
+  }
+  // Only the evidence lapsed: the tab's record shows no state (expired, even before the watchdog marks it, a failed sample or
+  // no recognized signal), not navigation, and the grace period has not ended. Unknown, failed or expired evidence is also
+  // what the repeat guard in attended() treats as the same condition, so the notification and the guard agree.
+  private lapsing(notice: Notice) {
+    const observation = this.records.get(notice.tabId)?.observation, now = this.access.now();
+    return Boolean(observation) && (observation!.state === 'unknown' || observation!.validUntil <= now) && observation!.unknownReason !== 'navigation'
+      && (notice.lapsedUntil === undefined || now < notice.lapsedUntil) && this.noticeScope(notice);
+  }
+  // After a lapse, within the grace period: the same reason raised again in that tab, as a new identity, unacknowledged and live.
+  private continuation(notice: Notice) {
+    const record = this.records.get(notice.tabId), attention = record?.observation.attention, now = this.access.now();
+    return record && attention && notice.lapsedUntil !== undefined && now < notice.lapsedUntil && record.observation.state === 'attention' && attention.reason === notice.reason
+      && attention.id !== notice.attentionId && !attention.acknowledged && record.observation.validUntil > now && this.noticeScope(notice) ? record : undefined;
+  }
+  // Acknowledgment (manual, mark all, automatic seen), replacement, navigation, tab closure, revocation and a service leaving
+  // the setting all end the attention a notification stands for: it is cleared. Expired, failed or unrecognized evidence only
+  // lapses it for NOTICE_GRACE: the same reason raised again in that tab meanwhile rebinds it to that new identity, without
+  // another Chrome call; anything else, or the end of the grace period, clears it.
+  private syncNotices() {
+    const now = this.access.now();
+    for (const [tabId, notice] of this.notices) {
+      if (this.holds(notice)) continue;
+      const record = this.continuation(notice);
+      if (record) {
+        Object.assign(notice, { record, identity: record.identity, attentionId: record.observation.attention!.id });
+        delete notice.lapsedUntil; remember(this.notified, notice.attentionId, NOTIFIED_LIMIT);
+      } else if (this.lapsing(notice)) notice.lapsedUntil ??= now + NOTICE_GRACE;
+      else this.dismiss(tabId);
+    }
+    clearTimeout(this.graceTimer);
+    const deadlines = [...this.notices.values()].flatMap(notice => notice.lapsedUntil ?? []);
+    if (deadlines.length) this.graceTimer = setTimeout(() => this.syncNotices(), Math.max(1, Math.ceil(Math.min(...deadlines) - now) + 1));
+  }
+  // Resolves once test() holds, checked now and after every change, or after ms at the latest.
+  private until(test: () => boolean, ms: number) {
+    return new Promise<void>(resolve => {
+      const done = () => { clearTimeout(timer); this.waiters.delete(check); resolve(); }, check = () => { if (test()) done(); };
+      const timer = setTimeout(done, ms);
+      this.waiters.add(check); check();
+    });
+  }
+  // Activity is discarded with each worker life, so notifications a previous life left can no longer follow their
+  // attention: they are cleared once and never shown again. Those of this life are kept. Also run when the permission is
+  // granted again, for notifications Chrome could not clear while it was removed.
+  private clearStaleNotices() {
+    void this.access.shownNotifications().catch(() => [] as string[]).then(ids => { for (const id of ids) if (isNoticeId(id) && this.noticeTab(id) === undefined) this.clearNotice(id); });
+  }
   expire() {
     let changed = false;
     for (const record of this.records.values()) if (record.observation.validUntil <= this.access.now() && record.observation.unknownReason !== 'expired' && record.observation.unknownReason !== 'navigation') { makeUnknown(record, 'expired', this.access.now()); changed = true; }
@@ -427,7 +604,7 @@ export class WebActivity {
     this.painted = badge;
     this.badgeQueue = this.badgeQueue.catch(() => undefined).then(() => this.access.badge(badge)).catch(() => { if (this.painted === badge) this.painted = undefined; });
   }
-  private changed() { this.paintBadge(); this.access.notify(); this.arm(); this.dwell(); }
+  private changed() { this.paintBadge(); this.access.notify(); this.arm(); this.dwell(); this.syncNotices(); for (const check of [...this.waiters]) check(); }
   // The clock is fractional and setTimeout truncates its delay, so the watchdog rounds up past the earliest validUntil.
   private arm() {
     clearTimeout(this.expiry);
@@ -452,6 +629,12 @@ export function chromeActivityAccess(focus: ActivityAccess['focus'], notify: () 
       const [tab] = await chrome.tabs.query({ active: true, windowId: window.id });
       return tab?.active && validIndex(tab.id) && tab.windowId === window.id ? { tabId: tab.id, windowId: window.id } : undefined;
     },
+    // Optional OS notifications. chrome.notifications is absent until the optional permission is granted; once it is removed,
+    // the object can remain but Chrome refuses its calls, so a clear then rejects.
+    canNotify: () => chrome.permissions.contains({ permissions: [NOTIFICATION_PERMISSION] }),
+    showNotification: async (id, notice) => { await chrome.notifications.create(id, { type: 'basic', iconUrl: chrome.runtime.getURL('icons/icon128.png'), title: notice.title, message: notice.message, contextMessage: 'Pilovo', priority: 0, requireInteraction: false }); },
+    clearNotification: async id => { if (chrome.notifications) await chrome.notifications.clear(id); },
+    shownNotifications: async () => chrome.notifications ? Object.keys(await chrome.notifications.getAll()) : [],
     register: provider => chrome.scripting.registerContentScripts([{ id: registration(provider), js: ['observer.js'], matches: [providerInfo(provider).pattern], allFrames: false, runAt: 'document_idle', world: 'ISOLATED', persistAcrossSessions: false }]),
     unregister: async provider => { await chrome.scripting.unregisterContentScripts({ ids: [registration(provider)] }); },
     install: async tabId => { await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', files: ['observer.js'] }); },

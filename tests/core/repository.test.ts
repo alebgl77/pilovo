@@ -73,7 +73,7 @@ describe('automatic seen preference', () => {
   });
   it('merges settings stored by an older version over the defaults on every read, without a migration', async () => {
     const name = crypto.randomUUID(), db = repo(name); await db.snapshot(); await store(name, legacy);
-    const expected = { ...legacy, bridgeEnabled: false, autoAcknowledgeSeconds: 0 };
+    const expected = { ...legacy, bridgeEnabled: false, autoAcknowledgeSeconds: 0, notifyProviders: [] };
     expect((await db.snapshot()).settings).toEqual(expected);
     expect((await db.exportData())).toMatchObject({ schemaVersion: 2, settings: expected });
     // Retention and prompt reads keep working on the old record.
@@ -102,5 +102,39 @@ describe('automatic seen preference', () => {
     expect((await restarted.snapshot()).settings.autoAcknowledgeSeconds).toBe(15); expect((await restarted.exportData()).settings.autoAcknowledgeSeconds).toBe(15);
     // Purge keeps preferences, this one included.
     await restarted.purgeAll(); expect((await restarted.snapshot()).settings.autoAcknowledgeSeconds).toBe(15);
+  });
+});
+
+describe('optional OS notification services preference', () => {
+  const legacy = { language: 'en', theme: 'dark', retentionDays: 7, retainPrompts: true, notifications: false, bridgeEnabled: true, autoAcknowledgeSeconds: 15 };
+  const store = async (name: string, value: unknown) => { const raw = await openDB(name); await raw.put('meta', { key: 'settings', value }); raw.close(); };
+  const stored = async (name: string) => { const raw = await openDB(name); const row = await raw.get('meta', 'settings'); raw.close(); return row?.value; };
+  it('is empty by default, and settings stored before it existed read as empty without a migration', async () => {
+    expect(DEFAULT_SETTINGS.notifyProviders).toEqual([]);
+    const fresh = repo(); expect((await fresh.snapshot()).settings.notifyProviders).toEqual([]); expect((await fresh.exportData()).settings.notifyProviders).toEqual([]);
+    const name = crypto.randomUUID(), db = repo(name); await db.snapshot(); await store(name, legacy);
+    expect((await db.snapshot()).settings).toEqual({ ...legacy, bridgeEnabled: false, notifyProviders: [] }); expect(await stored(name)).toEqual(legacy);
+    // Unexpected stored values read as empty and are replaced on the next write; the legacy notifications flag is untouched.
+    for (const value of [['claude-web', 'claude-web'], ['other-web'], 'claude-web', null, 1, [true]]) {
+      await store(name, { ...legacy, notifyProviders: value });
+      expect((await db.snapshot()).settings.notifyProviders, JSON.stringify(value)).toEqual([]); expect((await db.exportData()).settings.notifyProviders).toEqual([]);
+    }
+    expect(await db.updateSettings({ theme: 'light' })).toMatchObject({ notifyProviders: [], notifications: false, autoAcknowledgeSeconds: 15 }); expect(await stored(name)).toMatchObject({ notifyProviders: [] });
+    // The shared default is never mutated through a returned settings object.
+    (await db.snapshot()).settings.notifyProviders.push('claude-web'); expect(DEFAULT_SETTINGS.notifyProviders).toEqual([]);
+  });
+  it('accepts only a list of distinct services, keeps it across restarts and purge, and carries it in the export', async () => {
+    const name = crypto.randomUUID(), db = repo(name);
+    for (const value of [['claude-web'], ['chatgpt-web', 'claude-web'], [], ['chatgpt-web']] as const) expect((await db.updateSettings({ notifyProviders: [...value] })).notifyProviders).toEqual(value);
+    for (const invalid of [['claude-web', 'claude-web'], ['claude-web', 'chatgpt-web', 'chatgpt-web'], ['claude-code'], ['codex'], ['CLAUDE-WEB'], 'claude-web', null, true, 1, [1], [null], { 0: 'claude-web' }]) {
+      await expect(db.updateSettings({ notifyProviders: invalid as never }), JSON.stringify(invalid)).rejects.toMatchObject({ code: 'validation.invalid' });
+      expect(rpcSchema.safeParse({ method: 'updateSettings', patch: { notifyProviders: invalid } }).success, JSON.stringify(invalid)).toBe(false);
+    }
+    expect(rpcSchema.safeParse({ method: 'updateSettings', patch: { notifyProviders: ['claude-web'], notifyAll: true } }).success).toBe(false);
+    // The legacy native-agent flag stays refused: the new setting does not reopen it.
+    await expect(db.updateSettings({ notifications: true })).rejects.toMatchObject({ code: 'validation.invalid' });
+    const restarted = repo(name);
+    expect((await restarted.snapshot()).settings.notifyProviders).toEqual(['chatgpt-web']); expect((await restarted.exportData()).settings.notifyProviders).toEqual(['chatgpt-web']);
+    await restarted.purgeAll(); expect((await restarted.snapshot()).settings.notifyProviders).toEqual(['chatgpt-web']);
   });
 });

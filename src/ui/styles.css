@@ -313,6 +313,14 @@ summary svg { margin-right: 5px; }
 .action-dialog .field-label { margin-top: 18px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 25px; }
 .checkbox-label { display: flex; align-items: center; gap: 10px; font-size: 14px; line-height: 1.6; }
+/* Optional OS notifications: one checkbox per service under the activity settings, laid out like a setting row. */
+.notify-setting { border: 0; margin: 20px 0 0; padding: 0; min-width: 0; font-size: 14px; }
+.notify-setting legend { padding: 0; font-size: 14px; font-weight: 500; }
+.notify-setting p { color: var(--muted); font-size: 14px; margin-top: 6px; max-width: 56ch; }
+.notify-setting .field-error { color: var(--danger); }
+.notify-options { display: flex; flex-wrap: wrap; gap: 6px 24px; margin-top: 12px; }
+.notify-options .checkbox-label { cursor: pointer; }
+.notify-options .checkbox-label:has(input:disabled, input[aria-disabled='true']) { cursor: default; color: var(--muted); }
 .field-error { color: var(--danger); font-size: 14px; }
 .action-dialog .dialog-error { color: var(--danger); margin-top: 15px; margin-bottom: 0; }
 .feedback { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 24px 6px 32px; min-height: 43px; flex-shrink: 0; color: var(--accent); background: var(--selected-row); border-bottom: 1px solid var(--line); font-size: 14px; line-height: 1.55; }
@@ -436,7 +444,7 @@ summary svg { margin-right: 5px; }
   .status-facts small { margin-left: 11px; }
   .review-actions .button, .context-actions .button, .bridge-actions .button { font-size: 13px; }
 }
-@media (pointer: coarse) { .button, .icon-button, .mission-tabs button, summary { min-height: 44px; } .icon-button { min-width: 44px; } .nav-item { min-height: 58px; } input:not([type='checkbox']), select { min-height: 44px; } }
+@media (pointer: coarse) { .button, .icon-button, .mission-tabs button, summary, .notify-options .checkbox-label { min-height: 44px; } .icon-button { min-width: 44px; } .nav-item { min-height: 58px; } input:not([type='checkbox']), select { min-height: 44px; } }
 .web-page { padding: 0 32px 40px; }
 .web-intro { padding: 4px 0 14px; }
 .web-intro h2 { font-size: 15px; margin-bottom: 8px; }

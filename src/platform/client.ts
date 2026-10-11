@@ -45,6 +45,10 @@ function extensionClient(): HubClient {
     // Keep request() directly in the UI's click call stack; the worker never requests permissions.
     requestWebDiscoveryPermission: provider => chrome.permissions.request({ origins: origins(provider) }),
     removeWebDiscoveryPermission: provider => chrome.permissions.remove({ origins: origins(provider) }),
+    // Optional OS notifications: request() also stays in the click's call stack; the worker only reads the permission.
+    hasNotificationPermission: () => chrome.permissions.contains({ permissions: ['notifications'] }),
+    requestNotificationPermission: () => chrome.permissions.request({ permissions: ['notifications'] }),
+    removeNotificationPermission: () => chrome.permissions.remove({ permissions: ['notifications'] }),
     createWebPreparation: input => rpc({ method: 'createWebPreparation', input }),
     updateWebPreparation: (id, patch) => rpc({ method: 'updateWebPreparation', id, patch }),
     deleteWebPreparation: id => rpc({ method: 'deleteWebPreparation', id }),

@@ -6,6 +6,8 @@ export const WEB_PROVIDERS = [
 ] as const;
 export const WEB_ORIGINS = WEB_PROVIDERS.map(provider => provider.pattern);
 export const webProviderSchema = z.enum(['claude-web', 'chatgpt-web']);
+// Optional OS notifications: the services the user opted into, each at most once. Empty, the default, turns them off.
+export const notifyProvidersSchema = z.array(webProviderSchema).max(WEB_PROVIDERS.length).refine(list => new Set(list).size === list.length);
 export const webStatusSchema = z.enum(['prepared', 'sent_by_user', 'completed_by_user']);
 export type WebProvider = z.infer<typeof webProviderSchema>;
 export type WebPreparationStatus = z.infer<typeof webStatusSchema>;

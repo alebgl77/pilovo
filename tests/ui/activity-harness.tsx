@@ -9,7 +9,10 @@ import type { HubClient, Snapshot } from '../../src/shared/types';
 import '../../src/ui/styles.css';
 
 const listeners = new Set<() => void>(), grants = new Set<WebProvider>();
-const calls = { focus: [] as string[], ack: [] as { id: string; attentionId: string }[], ackAll: [] as (string[] | undefined)[], label: [] as { id: string; label: string | null }[], permission: [] as { provider?: WebProvider; revoke: boolean }[], opens: [] as WebProvider[], reads: 0 };
+const calls = { focus: [] as string[], ack: [] as { id: string; attentionId: string }[], ackAll: [] as (string[] | undefined)[], label: [] as { id: string; label: string | null }[], permission: [] as { provider?: WebProvider; revoke: boolean }[], opens: [] as WebProvider[], reads: 0, notifications: [] as { kind: 'request' | 'remove'; gesture: boolean }[] };
+// Chrome's optional notifications permission as the extension client would read it; denyNotifications mirrors a refused prompt,
+// notificationReadFailure an unreadable permission and notificationRequestFailure a request that rejects or throws.
+let notificationPermission = false, denyNotifications = false, notificationReadFailure = false, notificationRequestFailure: 'reject' | 'throw' | null = null;
 let records: WebActivityObservation[] = [], failure = false, shortcutFailure = false, focusFailure = false, ackFailure = false, ackAllFailure = false, deny = false, hold = new URL(location.href).searchParams.has('loading'), holdAck = false, holdAckAll = false;
 let shortcuts: ActivityShortcuts = { 'focus-next-attention': 'Alt+Shift+J' };
 // The window showing the panel; the 'attention' row's tab sits in another one. labelFailure mirrors a refused label RPC.
@@ -68,6 +71,15 @@ const api: HubClient = {
   },
   getShortcuts: async () => { if (shortcutFailure) throw new Error('commands unavailable'); return structuredClone(shortcuts); },
   getCurrentWindowId: async () => panelWindow,
+  // Records whether Chrome would see a user gesture: the request must be made in the checkbox's own event.
+  hasNotificationPermission: async () => { if (notificationReadFailure) throw new Error('permissions unavailable'); return notificationPermission; },
+  requestNotificationPermission: () => {
+    calls.notifications.push({ kind: 'request', gesture: navigator.userActivation.isActive });
+    if (notificationRequestFailure === 'throw') throw new Error('request unavailable');
+    if (notificationRequestFailure === 'reject') return Promise.reject(new Error('request failed'));
+    if (!denyNotifications) notificationPermission = true; return Promise.resolve(!denyNotifications);
+  },
+  removeNotificationPermission: () => { calls.notifications.push({ kind: 'remove', gesture: navigator.userActivation.isActive }); notificationPermission = false; return Promise.resolve(true); },
   // Mirrors the worker: the strict label schema, a live observation (current, unexpired), tab-level memory only; null clears.
   labelWebActivity: async (id, label) => {
     calls.label.push({ id, label });
@@ -99,6 +111,13 @@ Object.assign(window, { __activity: {
   panelWindow: (value: number | undefined) => { panelWindow = value; signal(); },
   noWindow: () => { delete api.getCurrentWindowId; signal(); },
   failLabel: (value: boolean) => { labelFailure = value; },
+  // Optional notifications: a refused prompt, the permission removed in Chrome's settings (the worker then refreshes the
+  // panels), or the browser preview, which has no permission methods.
+  denyNotifications: (value: boolean) => { denyNotifications = value; },
+  failNotificationRead: (value: boolean) => { notificationReadFailure = value; signal(); },
+  failNotificationRequest: (value: 'reject' | 'throw' | null) => { notificationRequestFailure = value; },
+  notificationPermission: (value: boolean) => { notificationPermission = value; signal(); },
+  noNotifications: () => { delete api.hasNotificationPermission; delete api.requestNotificationPermission; delete api.removeNotificationPermission; signal(); },
   // The displayed state began `ago` ms before now (negative: a future start, as with clock skew). A reason raises a new attention identity.
   since: (id: string, ago: number, reason?: WebAttentionReason) => {
     const record = records.find(record => record.id === id); if (!record) return;

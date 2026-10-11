@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebActivity, type ActivityAccess, type ActivityView } from '../../src/background/activity';
 import { makeUnknown, newActivityRecord, reduceActivity } from '../../src/background/activity-reducer';
 import { BADGE_COLORS, BADGE_TEXT_COLOR } from '../../src/background/activity-badge';
+import { NOTICE_GRACE, NOTICE_LIMIT, NOTICE_RESAMPLE, NOTIFIED_LIMIT, noticeId, parseNoticeId, remember, type ActivityNotice } from '../../src/background/activity-notifications';
 import { activityHintSchema, activitySampleSchema, ACTIVITY_TTL, type ActivityEvidence, type ActivityLease } from '../../src/shared/activity';
 import type { WebTab } from '../../src/platform/web';
 
@@ -97,6 +98,7 @@ beforeEach(() => {
     sample: vi.fn(async (_tab, lease) => [{ frameId: 0, documentId, result: { version: 1, requestId: lease.requestId, activationId, evidence } }]),
     focus: vi.fn(async (_provider, _tabId, current) => { if (!current()) throw new Error('expired'); }), badge: vi.fn(async () => undefined), notify: vi.fn(),
     viewing: vi.fn(async () => undefined),
+    canNotify: vi.fn(async () => false), showNotification: vi.fn(async () => undefined), clearNotification: vi.fn(async () => undefined), shownNotifications: vi.fn(async () => []),
   };
   activity = new WebActivity(access);
 });
@@ -813,5 +815,264 @@ describe('optional automatic seen after dwelling on the tab', () => {
     // A longer delay restarts from the change for the next attention.
     await raise(1, 'error_visible'); await keep(2000); activity.setAutoAcknowledge(30); await keep(29_999); expect(seen(1)).toBe(false);
     await tick(1); expect(seen(1)).toBe(true);
+  });
+});
+
+describe('optional OS notifications', () => {
+  const evidenceFor = new Map<number, ActivityEvidence>(), documents = new Map<number, string>(), activations = new Map<number, string>();
+  let tabIds = [1, 2], permitted = true, view: ActivityView | undefined;
+  const tabOf = (id: number) => ({ id, windowId: 2, index: id, url: `https://chatgpt.com/c/PRIVATE_URL_CANARY_${id}`, status: 'complete' });
+  const byTab = (tabId: number) => activity.snapshot().observations.find(observation => observation.tabId === tabId);
+  // What Chrome displays: created, then cleared or closed.
+  const displayed = new Map<string, ActivityNotice>();
+  const created = () => vi.mocked(access.showNotification).mock.calls;
+  const cleared = () => vi.mocked(access.clearNotification).mock.calls.map(([id]) => id);
+  const idOf = (tabId: number) => noticeId(byTab(tabId)!.id, byTab(tabId)!.attention!.id);
+  const raise = async (tabId: number, value: ActivityEvidence) => { evidenceFor.set(tabId, value); activity.updateTab(tabId, {}, tabOf(tabId)); await tick(1000); await tick(); };
+  // Heartbeats: samples of unchanged evidence keep the same attention identity.
+  const keep = async (ms: number, ids = tabIds) => { const end = now + ms; while (now < end) { for (const id of ids) activity.updateTab(id, {}, tabOf(id)); await tick(Math.min(1000, end - now)); } };
+  const look = async (tabId?: number) => { view = tabId === undefined ? undefined : { tabId, windowId: 2 }; activity.viewChanged(); await tick(); };
+  beforeEach(() => {
+    tabIds = [1, 2]; permitted = true; view = undefined; displayed.clear();
+    for (const id of Array.from({ length: 24 }, (_, index) => index + 1)) { evidenceFor.set(id, 'working'); documents.set(id, `document-${id}`); activations.set(id, crypto.randomUUID()); }
+    vi.mocked(access.tabs).mockImplementation(async () => tabIds.map(tabOf));
+    vi.mocked(access.tab).mockImplementation(async id => tabOf(id));
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: evidenceFor.get(tabId)! } }]);
+    vi.mocked(access.viewing).mockImplementation(async () => view && { ...view });
+    vi.mocked(access.canNotify).mockImplementation(async () => permitted);
+    vi.mocked(access.showNotification).mockImplementation(async (id, notice) => { displayed.set(id, notice); });
+    vi.mocked(access.clearNotification).mockImplementation(async id => { displayed.delete(id); });
+  });
+  it('notifies once when a new attention is raised, with the service, reason and session number only, in the app language', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick();
+    // A session name typed by the user never reaches a notification.
+    activity.label(byTab(1)!.id, 'PRIVATE_LABEL_CANARY'); activity.label(byTab(2)!.id, 'PRIVATE_LABEL_CANARY');
+    await raise(1, 'input_required');
+    const first = idOf(1);
+    expect(created()).toEqual([[first, { title: 'ChatGPT', message: 'Intervention demandée · session 1' }]]);
+    expect(first).toMatch(/^pilovo:[0-9a-f-]{36}:[0-9a-f-]{36}$/); expect(parseNoticeId(first)).toEqual({ observationId: byTab(1)!.id, attentionId: byTab(1)!.attention!.id });
+    // Heartbeats keep the same identity: still one notification, and the badge is unaffected.
+    await keep(10_000); expect(created()).toHaveLength(1); expect([...displayed.keys()]).toEqual([first]);
+    activity.setLanguage('en'); await raise(2, 'error_visible');
+    expect(created()[1]).toEqual([idOf(2), { title: 'ChatGPT', message: 'Error visible · session 2' }]);
+    // A response becomes available after observed work, replacing tab 1's notification.
+    await raise(1, 'working'); expect(displayed.has(first)).toBe(false);
+    await raise(1, 'idle_ready'); await raise(1, 'idle_ready');
+    expect(byTab(1)!.attention!.reason).toBe('response_ready'); expect(created()[2]).toEqual([idOf(1), { title: 'ChatGPT', message: 'Response available · session 1' }]);
+    expect(created()).toHaveLength(3); expect(activity.snapshot().observations.every(observation => !observation.attention!.acknowledged)).toBe(true);
+    expect(JSON.stringify(created())).not.toMatch(/PRIVATE|https:|chatgpt\.com|document-|label/i);
+    expect(access.focus).not.toHaveBeenCalled();
+  });
+  it('words each reason in French and English and names Claude for its service', async () => {
+    const { activityNotice } = await import('../../src/background/activity-notifications');
+    expect(['response_ready', 'input_required', 'error_visible'].map(reason => activityNotice('claude-web', reason as never, 3, 'fr'))).toEqual([
+      { title: 'Claude', message: 'Réponse disponible · session 3' }, { title: 'Claude', message: 'Intervention demandée · session 3' }, { title: 'Claude', message: 'Erreur visible · session 3' }]);
+    expect(['response_ready', 'input_required', 'error_visible'].map(reason => activityNotice('chatgpt-web', reason as never, 1, 'en').message)).toEqual(['Response available · session 1', 'Input requested · session 1', 'Error visible · session 1']);
+  });
+  it('never notifies a service left off, without the permission, or for the tab being viewed', async () => {
+    activity.start(); await tick();
+    // Off by default: the permission and the view are not even asked.
+    await raise(1, 'input_required'); expect(access.canNotify).not.toHaveBeenCalled(); expect(access.viewing).not.toHaveBeenCalled();
+    activity.setNotifyProviders(['claude-web']); await raise(1, 'error_visible'); expect(access.canNotify).not.toHaveBeenCalled();
+    // Enabled but Chrome no longer grants the permission, or cannot answer.
+    activity.setNotifyProviders(['chatgpt-web']); permitted = false; await raise(1, 'input_required'); expect(access.canNotify).toHaveBeenCalledOnce();
+    vi.mocked(access.canNotify).mockRejectedValueOnce(new Error('unavailable')); await raise(1, 'error_visible');
+    expect(created()).toEqual([]);
+    // Granted: not for the active tab of the focused window, but for another tab.
+    permitted = true; view = { tabId: 1, windowId: 2 }; await raise(1, 'input_required'); expect(created()).toEqual([]);
+    await raise(2, 'input_required'); expect(created().map(([id]) => id)).toEqual([idOf(2)]);
+    // A failed view query counts as not viewed.
+    vi.mocked(access.viewing).mockRejectedValueOnce(new Error('No window')); await raise(1, 'error_visible'); expect(created().map(([id]) => id)).toEqual([idOf(2), idOf(1)]);
+    // Unsupported values mean no service at all.
+    for (const value of [['chatgpt-web', 'chatgpt-web'], ['other-web'], 'chatgpt-web', null, undefined, [1]]) { activity.setNotifyProviders(value); await raise(2, byTab(2)!.attention!.reason === 'error_visible' ? 'input_required' : 'error_visible'); }
+    expect(created()).toHaveLength(2);
+  });
+  it('never notifies attention raised before its service was enabled, even when re-enabled during the checks', async () => {
+    activity.start(); await tick(); await raise(1, 'input_required');
+    activity.setNotifyProviders(['chatgpt-web']); await keep(20_000); expect(created()).toEqual([]);
+    // Raised while enabled, but the setting goes off and on again before the permission answers.
+    const slow = deferred<boolean>(); vi.mocked(access.canNotify).mockReturnValueOnce(slow.promise);
+    await raise(2, 'input_required'); activity.setNotifyProviders([]); activity.setNotifyProviders(['chatgpt-web']); slow.resolve(true); await tick();
+    expect(created()).toEqual([]);
+    // An attention raised after enabling is notified.
+    await raise(1, 'error_visible'); expect(created().map(([id]) => id)).toEqual([idOf(1)]);
+  });
+  it('re-checks everything after the asynchronous checks: an attention seen, replaced or expired meanwhile is not notified', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick();
+    for (const change of ['seen', 'replaced', 'navigation'] as const) {
+      const slow = deferred<boolean>(); vi.mocked(access.canNotify).mockReturnValueOnce(slow.promise);
+      await raise(1, change === 'replaced' ? 'input_required' : 'error_visible');
+      if (change === 'seen') activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id);
+      else if (change === 'replaced') { permitted = false; await raise(1, 'error_visible'); permitted = true; }
+      else activity.updateTab(1, { url: `${tabOf(1).url}/next` }, tabOf(1));
+      slow.resolve(true); await tick(); expect(created(), change).toEqual([]);
+      await raise(1, 'working');
+    }
+  });
+  it('keeps one notification per tab: a newer attention replaces it; at most NOTICE_LIMIT are shown, oldest cleared first', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick();
+    await raise(1, 'input_required'); const first = idOf(1);
+    await raise(1, 'error_visible'); const second = idOf(1);
+    expect(cleared()).toEqual([first]); expect([...displayed.keys()]).toEqual([second]);
+    // Creation and clearing are serialized: Chrome never sees a clear before the creation it undoes.
+    const order = [...vi.mocked(access.showNotification).mock.invocationCallOrder, ...vi.mocked(access.clearNotification).mock.invocationCallOrder].sort((a, b) => a - b);
+    expect(order[1]).toBe(vi.mocked(access.clearNotification).mock.invocationCallOrder[0]);
+    tabIds = Array.from({ length: NOTICE_LIMIT + 4 }, (_, index) => index + 1); activity.refresh(); await tick(1000);
+    for (const id of tabIds) evidenceFor.set(id, 'input_required');
+    for (const id of tabIds.slice(1)) { activity.updateTab(id, {}, tabOf(id)); await tick(); }
+    await tick(1000); await tick();
+    expect(displayed.size).toBe(NOTICE_LIMIT);
+    // The oldest ones (tab 1's, then the first tabs raised) went first; the latest are all shown.
+    expect(displayed.has(second)).toBe(false); for (const id of tabIds.slice(-NOTICE_LIMIT)) expect(displayed.has(idOf(id)), String(id)).toBe(true);
+  });
+  it('remembers notified identities in a bounded set, forgetting the oldest first', () => {
+    const seen = new Set<string>();
+    for (let index = 0; index < NOTIFIED_LIMIT + 10; index++) remember(seen, `id-${index}`, NOTIFIED_LIMIT);
+    expect(seen.size).toBe(NOTIFIED_LIMIT); expect(seen.has('id-9')).toBe(false); expect(seen.has('id-10')).toBe(true);
+    remember(seen, 'id-10', NOTIFIED_LIMIT); remember(seen, 'new', NOTIFIED_LIMIT); expect(seen.has('id-10')).toBe(true); expect(seen.has('id-11')).toBe(false);
+  });
+  it.each(['manual seen', 'mark all', 'automatic seen', 'navigation', 'tab close', 'revocation', 'service disabled'] as const)('clears the notification on %s', async change => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    const id = idOf(1), other = idOf(2); expect([...displayed.keys()]).toEqual([id, other]);
+    if (change === 'manual seen') activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id);
+    else if (change === 'mark all') activity.acknowledgeAll([byTab(1)!.attention!.id]);
+    else if (change === 'automatic seen') { activity.setAutoAcknowledge(5); await look(1); await keep(5000); expect(byTab(1)!.attention!.acknowledged).toBe(true); }
+    else if (change === 'navigation') activity.updateTab(1, { url: `${tabOf(1).url}/next` }, tabOf(1));
+    else if (change === 'tab close') activity.invalidateTab(1, true);
+    else if (change === 'revocation') activity.revoke('chatgpt-web');
+    else activity.setNotifyProviders([]);
+    await tick();
+    expect(cleared()).toContain(id); expect(displayed.has(id)).toBe(false);
+    // Only that attention's notification goes, unless the change concerns every one.
+    expect(displayed.has(other)).toBe(!['revocation', 'service disabled'].includes(change));
+    expect(created()).toHaveLength(2);
+  });
+  it('a click focuses through the revalidated focus and clears the notification, even when focus fails, without acknowledging', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    const acknowledge = vi.spyOn(activity, 'acknowledge'), focus = vi.spyOn(activity, 'focus');
+    const id = idOf(1), observation = byTab(1)!, samples = vi.mocked(access.sample).mock.calls.length;
+    const clicked = activity.notificationClicked(id); await tick();
+    expect(cleared()).toEqual([id]);
+    await tick(1000); expect(await clicked).toBe('focused');
+    expect(focus).toHaveBeenCalledExactlyOnceWith(observation.id, observation.attention!.id); expect(access.focus).toHaveBeenCalledExactlyOnceWith('chatgpt-web', 1, expect.any(Function));
+    // Focus took its own fresh sample; the attention stays to review: a click is not a seen acknowledgment.
+    expect(vi.mocked(access.sample).mock.calls.length).toBeGreaterThan(samples); expect(byTab(1)!.attention).toEqual(observation.attention); expect(acknowledge).not.toHaveBeenCalled();
+    // The fresh sample shows another attention: focus fails, yet the clicked notification is cleared.
+    const second = idOf(2); evidenceFor.set(2, 'error_visible');
+    const failed = activity.notificationClicked(second); await tick(1000); expect(await failed).toBe('failed');
+    expect(cleared()).toContain(second); expect(access.focus).toHaveBeenCalledOnce(); expect(byTab(2)!.attention!.reason).toBe('error_visible');
+    // Activation itself fails.
+    await raise(1, 'error_visible'); vi.mocked(access.focus).mockRejectedValueOnce(new Error('No tab'));
+    const third = idOf(1), rejected = activity.notificationClicked(third); await tick(1000); expect(await rejected).toBe('failed'); expect(cleared()).toContain(third);
+    expect(acknowledge).not.toHaveBeenCalled(); expect(activity.snapshot().observations.every(item => !item.attention?.acknowledged)).toBe(true);
+  });
+  it('ignores malformed notification IDs, and clears a well-formed one from a previous worker life after a failed focus', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required');
+    const id = idOf(1), uuid = crypto.randomUUID(), samples = vi.mocked(access.sample).mock.calls.length;
+    for (const malformed of ['', 'pilovo:', `pilovo:${uuid}`, `pilovo:${uuid}:x`, `pilovo:${uuid}:${uuid}:extra`, `other:${uuid}:${uuid}`, `PILOVO:${uuid}:${uuid}`, id.toUpperCase(), ` ${id}`, `${id}\n`, 42, null, undefined, { id }]) {
+      expect(await activity.notificationClicked(malformed), JSON.stringify(malformed)).toBe('ignored');
+    }
+    await tick(2000); expect(cleared()).toEqual([]); expect(access.focus).not.toHaveBeenCalled(); expect(vi.mocked(access.sample).mock.calls.length).toBeGreaterThanOrEqual(samples);
+    expect(displayed.has(id)).toBe(true);
+    const stale = noticeId(crypto.randomUUID(), crypto.randomUUID());
+    expect(await activity.notificationClicked(stale)).toBe('failed'); await tick(); expect(cleared()).toEqual([stale]); expect(displayed.has(id)).toBe(true);
+  });
+  it('forgets a notification the user or the system closed, without calling Chrome again', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required');
+    const id = idOf(1); displayed.delete(id); activity.notificationClosed(id); activity.notificationClosed('pilovo:not-ours'); activity.notificationClosed(7);
+    activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id); await tick(); expect(cleared()).toEqual([]);
+  });
+  it('keeps a notification through lapses of its evidence, standing for the same reason raised again in its tab, without notifying twice', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'error_visible');
+    const first = idOf(1), firstAttention = byTab(1)!.attention!.id;
+    // A throttled background tab: its evidence expires, and the next activity alarm samples the same error as a new identity.
+    await tick(ACTIVITY_TTL); expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' }); expect([...displayed.keys()]).toEqual([first]);
+    await tick(10_000); activations.set(1, crypto.randomUUID()); await raise(1, 'error_visible');
+    expect(byTab(1)!.attention!.id).not.toBe(firstAttention); expect(created()).toHaveLength(1); expect(cleared()).toEqual([]); expect([...displayed.keys()]).toEqual([first]);
+    // Lapse after lapse, and a sample without a recognized signal: still that one notification, for the latest identity.
+    for (let round = 0; round < 3; round++) { await tick(ACTIVITY_TTL + 15_000); expect(displayed.has(first)).toBe(true); activations.set(1, crypto.randomUUID()); await raise(1, 'error_visible'); }
+    await raise(1, 'unknown'); expect(displayed.has(first)).toBe(true); await raise(1, 'error_visible');
+    expect(created()).toHaveLength(1); expect(cleared()).toEqual([]); expect([...displayed.keys()]).toEqual([first]);
+    // Seeing the latest identity clears it; the same condition sampled again after another lapse is not notified anew.
+    activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id); await tick(); expect(cleared()).toEqual([first]); expect(displayed.size).toBe(0);
+    await tick(ACTIVITY_TTL); activations.set(1, crypto.randomUUID()); await raise(1, 'error_visible'); expect(created()).toHaveLength(1);
+    // Another reason is new; so is the same reason after observed work.
+    await raise(1, 'input_required'); expect(created()).toHaveLength(2);
+    await raise(1, 'working'); await raise(1, 'input_required'); expect(created()).toHaveLength(3);
+    // A tab closing forgets it: a new tab with the same ID starts afresh.
+    activity.invalidateTab(1, true); activations.set(1, crypto.randomUUID()); await raise(1, 'input_required'); expect(created()).toHaveLength(4);
+    expect(byTab(1)!.attention).toMatchObject({ reason: 'input_required', acknowledged: false });
+  });
+  it('clears a lapsed notification when its grace period ends without the same reason, or at once on other evidence or settings', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    const id = idOf(1), other = idOf(2), deadline = byTab(1)!.validUntil;
+    // Tab 2 keeps being sampled; tab 1 is not sampled again after its evidence expires.
+    await keep(deadline + NOTICE_GRACE - 500 - now, [2]); expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' }); expect(displayed.has(id)).toBe(true);
+    await keep(1500, [2]); expect(displayed.has(id)).toBe(false); expect(cleared()).toEqual([id]); expect(displayed.has(other)).toBe(true);
+    // The same reason sampled after the grace period is the same run: not notified again.
+    activations.set(1, crypto.randomUUID()); await raise(1, 'input_required'); expect(created()).toHaveLength(2);
+    // During a lapse, observed work, another reason, navigation or the service leaving the setting clears it at once.
+    for (const change of ['working', 'error_visible', 'navigation', 'service disabled'] as const) {
+      activity.setNotifyProviders(['chatgpt-web']); await raise(2, 'working'); await raise(2, 'input_required');
+      const lapsed = idOf(2), shown = created().length; await tick(ACTIVITY_TTL); expect(displayed.has(lapsed), change).toBe(true);
+      if (change === 'navigation') activity.updateTab(2, { url: `${tabOf(2).url}/next` }, tabOf(2));
+      else if (change === 'service disabled') activity.setNotifyProviders([]);
+      else await raise(2, change);
+      await tick(); expect(displayed.has(lapsed), change).toBe(false); expect(cleared()).toContain(lapsed);
+      // Another reason is a new attention: notified in its place.
+      expect(created().length, change).toBe(shown + Number(change === 'error_visible'));
+    }
+  });
+  it('a click on a notification that outlived a lapse focuses the attention it now stands for, sampling the tab first while it is lapsed', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required');
+    const acknowledge = vi.spyOn(activity, 'acknowledge'), focus = vi.spyOn(activity, 'focus');
+    // Rebound after a lapse: the ID still names the first identity, the click focuses the current one.
+    const id = idOf(1); await tick(ACTIVITY_TTL + 5000); activations.set(1, crypto.randomUUID()); await raise(1, 'input_required');
+    const rebound = byTab(1)!; expect(rebound.attention!.id).not.toBe(parseNoticeId(id)!.attentionId); expect([...displayed.keys()]).toEqual([id]);
+    let clicked = activity.notificationClicked(id); await tick(); expect(cleared()).toEqual([id]);
+    await tick(1000); expect(await clicked).toBe('focused'); expect(focus).toHaveBeenLastCalledWith(rebound.id, rebound.attention!.id);
+    // Lapsed when clicked: the tab is sampled at once; the same reason raised again there is focused through focus().
+    await raise(1, 'working'); await raise(1, 'error_visible'); const second = idOf(1); await tick(ACTIVITY_TTL); expect(displayed.has(second)).toBe(true);
+    const samples = vi.mocked(access.sample).mock.calls.length; activations.set(1, crypto.randomUUID());
+    clicked = activity.notificationClicked(second); await tick(); expect(cleared()).toContain(second); expect(vi.mocked(access.sample).mock.calls.length).toBe(samples + 1);
+    await tick(1000); expect(await clicked).toBe('focused');
+    const current = byTab(1)!; expect(focus).toHaveBeenLastCalledWith(current.id, current.attention!.id); expect(current.attention).toMatchObject({ reason: 'error_visible', acknowledged: false });
+    expect(access.focus).toHaveBeenCalledTimes(2); expect(created()).toHaveLength(2);
+    // The fresh sample shows something else, or no sample comes back in time: nothing is focused, the notification is cleared.
+    await raise(1, 'input_required'); const third = idOf(1); await tick(ACTIVITY_TTL); evidenceFor.set(1, 'working');
+    clicked = activity.notificationClicked(third); await tick(); await tick(1000); expect(await clicked).toBe('failed'); expect(cleared()).toContain(third);
+    await raise(1, 'error_visible'); const fourth = idOf(1); await tick(ACTIVITY_TTL);
+    vi.mocked(access.tab).mockImplementation(async tabId => ({ ...tabOf(tabId), frozen: true }));
+    clicked = activity.notificationClicked(fourth); await tick(NOTICE_RESAMPLE - 1); expect(cleared()).toContain(fourth);
+    await tick(1); expect(await clicked).toBe('failed');
+    expect(access.focus).toHaveBeenCalledTimes(2); expect(acknowledge).not.toHaveBeenCalled();
+  });
+  it('forgets every notification when the permission is removed elsewhere, though Chrome then refuses to clear them, and clears what is left once granted again', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    const ids = [idOf(1), idOf(2)];
+    // As in Chrome: once the permission is gone, notification calls are refused.
+    permitted = false; vi.mocked(access.clearNotification).mockRejectedValue(new Error("'notifications.clear' is not available in this context"));
+    activity.notificationsRevoked(); await tick();
+    expect(cleared()).toEqual(ids); expect([...displayed.keys()]).toEqual(ids);
+    // Nothing is notified without it, and later changes do not try those clears again.
+    await raise(1, 'working'); await raise(1, 'error_visible'); activity.acknowledge(byTab(2)!.id, byTab(2)!.attention!.id); await tick();
+    expect(created()).toHaveLength(2); expect(cleared()).toEqual(ids);
+    // Granted again: what Chrome still lists from before is cleared, other extensions' notifications are not touched.
+    permitted = true; vi.mocked(access.clearNotification).mockImplementation(async id => { displayed.delete(id); });
+    vi.mocked(access.shownNotifications).mockImplementation(async () => [...displayed.keys(), 'other-notification']);
+    activity.notificationsGranted(); await tick(); expect(displayed.size).toBe(0); expect(cleared().slice(2)).toEqual(ids);
+  });
+  it('clears notifications a previous worker life left, once, and never shows them again', async () => {
+    const left = noticeId(crypto.randomUUID(), crypto.randomUUID());
+    vi.mocked(access.shownNotifications).mockResolvedValue([left, 'other-notification']);
+    activity = new WebActivity(access); await tick();
+    expect(cleared()).toEqual([left]); expect(created()).toEqual([]);
+    // Chrome cannot list them (permission not granted): nothing happens and no rejection escapes.
+    vi.mocked(access.shownNotifications).mockRejectedValue(new Error('requires permission')); activity = new WebActivity(access); await tick(); expect(cleared()).toEqual([left]);
+  });
+  it('drops a notification Chrome failed to create, so a later change does not try to clear it', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick();
+    vi.mocked(access.showNotification).mockRejectedValueOnce(new Error('requires permission')); await raise(1, 'input_required');
+    activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id); await tick(); expect(cleared()).toEqual([]);
   });
 });

@@ -6,7 +6,7 @@ import { eventSchema, taskKey } from '../shared/protocol';
 import type { AgentEvent, BridgeStatus, Connector, Diagnostics, ExportData, Mission, Settings, Snapshot, SourceId, TabBinding, TaskRun } from '../shared/types';
 import type { EventAck } from '../shared/protocol';
 import { makeVerificationCheck, type HashEvidence } from './verification';
-import { webPreparationInputSchema, webPreparationPatchSchema, type WebPreparation, type WebPreparationInput, type WebPreparationPatch } from '../shared/web';
+import { notifyProvidersSchema, webPreparationInputSchema, webPreparationPatchSchema, type WebPreparation, type WebPreparationInput, type WebPreparationPatch } from '../shared/web';
 import { autoAcknowledgeSchema } from '../shared/activity';
 
 export const LIMITS = { tasks: 2000, missions: 250, webPreparations: 250, eventsPerTask: 250, eventsTotal: 10000, deletedRuns: 10000, staleMs: 90_000 } as const;
@@ -23,12 +23,14 @@ interface HubDB extends DBSchema {
 }
 type WriteTx = IDBPTransaction<HubDB, ['tasks', 'missions', 'events', 'tombstones', 'meta', 'webPreparations'], 'readwrite'>;
 const stores = ['tasks', 'missions', 'events', 'tombstones', 'meta', 'webPreparations'] as const;
-const settingSchema = z.object({ language: z.enum(['fr', 'en']).optional(), theme: z.enum(['system', 'light', 'dark']).optional(), retentionDays: z.number().int().min(1).max(365).optional(), retainPrompts: z.boolean().optional(), notifications: z.literal(false).optional(), bridgeEnabled: z.boolean().optional(), autoAcknowledgeSeconds: autoAcknowledgeSchema.optional() }).strict();
-// Settings written by older versions lack newer fields (autoAcknowledgeSeconds): every read merges the stored value over
-// the defaults, without a migration, and an unexpected stored value falls back to its default (off).
+const settingSchema = z.object({ language: z.enum(['fr', 'en']).optional(), theme: z.enum(['system', 'light', 'dark']).optional(), retentionDays: z.number().int().min(1).max(365).optional(), retainPrompts: z.boolean().optional(), notifications: z.literal(false).optional(), bridgeEnabled: z.boolean().optional(), autoAcknowledgeSeconds: autoAcknowledgeSchema.optional(), notifyProviders: notifyProvidersSchema.optional() }).strict();
+// Settings written by older versions lack newer fields (autoAcknowledgeSeconds, notifyProviders): every read merges the
+// stored value over the defaults, without a migration, and an unexpected stored value falls back to its default (off).
 function storedSettings(value: unknown): Settings {
   const settings: Settings = { ...DEFAULT_SETTINGS, ...(value && typeof value === 'object' ? value as Partial<Settings> : {}), bridgeEnabled: false };
   if (!autoAcknowledgeSchema.safeParse(settings.autoAcknowledgeSeconds).success) settings.autoAcknowledgeSeconds = DEFAULT_SETTINGS.autoAcknowledgeSeconds;
+  const notify = notifyProvidersSchema.safeParse(settings.notifyProviders);
+  settings.notifyProviders = notify.success ? notify.data : [];
   return settings;
 }
 const titleSchema = z.string().trim().min(1).max(240);

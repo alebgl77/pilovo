@@ -32,13 +32,19 @@ try {
   let ui = await context.newPage(); await ui.goto(`chrome-extension://${extensionId}/index.html`);
   assert.deepEqual((await rpc(ui, { method: 'getWebActivity' })).observations, []);
   assert.equal((await rpc(ui, { method: 'getWebDiscovery' })).permission, 'not-granted');
-  record('production extension starts without host grants or observations');
+  // OS notifications are optional: not granted at install, and Chrome exposes no notifications API until they are.
+  assert.equal(await ui.evaluate(() => chrome.permissions.contains({ permissions: ['notifications'] })), false);
+  assert.equal(await ui.evaluate(() => typeof chrome.notifications), 'undefined');
+  assert.deepEqual((await rpc(ui, { method: 'getSnapshot' })).settings.notifyProviders, []);
+  record('production extension starts without host grants, the notifications permission or observations');
   // The separate fixture changes only the host permission declaration. Optional prompt/revoke remain unit/manual gates.
   await context.close();
   extensionDirectory = path.join(run, 'required-host-fixture'); profileDirectory = path.join(run, 'fixture-profile');
   await cp(path.join(root, 'dist'), extensionDirectory, { recursive: true });
   const fixtureManifest = JSON.parse(await readFile(path.join(extensionDirectory, 'manifest.json'), 'utf8'));
   fixtureManifest.host_permissions = ['https://chatgpt.com/*']; fixtureManifest.optional_host_permissions = ['https://claude.ai/*'];
+  // Also test-only: notifications declared as required, since headless Chromium cannot answer a permission prompt.
+  fixtureManifest.permissions = [...fixtureManifest.permissions, 'notifications']; delete fixtureManifest.optional_permissions;
   await writeFile(path.join(extensionDirectory, 'manifest.json'), JSON.stringify(fixtureManifest));
   context = await launch(); context.setDefaultTimeout(15000);
   await context.route('https://**/*', route => route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: route.request().url().startsWith('https://claude.ai/') ? claude() : gpt() }));
@@ -127,6 +133,25 @@ try {
   await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
   record('optional automatic seen: off by default, then after the delay on the active tab of the focused window only');
 
+  // Optional OS notifications through the real chrome.notifications API (headless Chromium supports it): none while off,
+  // none for the tab in front, one for a tab behind the extension page, cleared by seen. Content is unit-tested; Chrome
+  // lists IDs only here.
+  const notices = async () => Object.keys(await ui.evaluate(() => chrome.notifications.getAll()));
+  assert.deepEqual(await notices(), []);
+  assert.equal((await rpcResult(ui, { method: 'updateSettings', patch: { notifyProviders: ['chatgpt-web', 'chatgpt-web'] } })).ok, false);
+  assert.deepEqual((await rpc(ui, { method: 'updateSettings', patch: { notifyProviders: ['chatgpt-web'] } })).notifyProviders, ['chatgpt-web']);
+  await provider.bringToFront(); await complete();
+  await new Promise(resolve => setTimeout(resolve, 1500)); assert.deepEqual(await notices(), []);
+  await ui.bringToFront(); await complete();
+  const notified = (await activity()).observations[0];
+  await expect.poll(notices).toEqual([`pilovo:${notified.id}:${notified.attention.id}`]);
+  assert.equal((await activity()).observations[0].attention.acknowledged, false);
+  await rpc(ui, { method: 'acknowledgeWebActivity', id: notified.id, attentionId: notified.attention.id });
+  await expect.poll(notices).toEqual([]);
+  assert.deepEqual((await rpc(ui, { method: 'updateSettings', patch: { notifyProviders: [] } })).notifyProviders, []);
+  await provider.bringToFront();
+  record('optional OS notifications (test-only required permission): none for the tab in front, one for a tab behind, cleared by seen');
+
   await provider.evaluate(() => document.querySelector('form button').setAttribute('aria-label', 'Arrêter'));
   await expect.poll(states).toEqual(['working']);
   await provider.evaluate(() => document.querySelector('form button').setAttribute('aria-label', 'Démarrer une conversation vocale'));
@@ -184,6 +209,6 @@ try {
 } catch (error) { failures.push(String(error)); console.error(error); process.exitCode = 1; }
 finally {
   await context?.close();
-  const evidence = { checks, failures, limitations: ['Synthetic HTTPS fixtures only: no authenticated provider session or provider execution.', 'Production manifest no-grant phase is exact. Activity phase uses a TEST-ONLY clone declaring ChatGPT as required host; optional grant prompt and revocation remain unit/manual gates because headless prompt stays pending.', 'Worker termination/restart and browser-delayed badge expiry are covered by unit lifecycle tests, not a hard wall-clock guarantee.'] };
+  const evidence = { checks, failures, limitations: ['Synthetic HTTPS fixtures only: no authenticated provider session or provider execution.', 'Production manifest no-grant phase is exact. Activity phase uses a TEST-ONLY clone declaring ChatGPT as required host and notifications as a required permission; optional grant prompts, revocation and notification clicks remain unit/manual gates because headless prompts stay pending and Chrome offers no API to click a notification.', 'Worker termination/restart and browser-delayed badge expiry are covered by unit lifecycle tests, not a hard wall-clock guarantee.'] };
   await writeFile(path.join(run, 'evidence.json'), JSON.stringify(evidence, null, 2)); console.log(`Evidence: ${path.join(run, 'evidence.json')}`);
 }

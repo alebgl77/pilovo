@@ -13,7 +13,7 @@ Audience hypothesis: people working across ChatGPT and Claude web accounts who w
 - Local isolated observer of recognized DOM controls/status indicators, without collecting prompts, responses or tab titles.
 - Working; ready after witnessed work and debounce; explicitly recognized attention; unknown/stale evidence.
 - Focus, local seen acknowledgment and a last-observed attention toolbar badge.
-- Unreleased in source: a next-attention keyboard shortcut and local mark all as seen, both reusing the same focus/seen rules; elapsed durations for working and attention rows that restart when evidence is lost; a toolbar badge colored by the most urgent reason, a working mark and a counts-only tooltip in the app's language; stable per-service session numbers, the tab's position and an optional session name kept in memory for the tab's lifetime, never stored or exported; an optional automatic seen, off by default, after an item's tab stays in front in the focused window for 5, 15 or 30 seconds, still a local acknowledgment only.
+- Unreleased in source: a next-attention keyboard shortcut and local mark all as seen, both reusing the same focus/seen rules; elapsed durations for working and attention rows that restart when evidence is lost; a toolbar badge colored by the most urgent reason, a working mark and a counts-only tooltip in the app's language; stable per-service session numbers, the tab's position and an optional session name kept in memory for the tab's lifetime, never stored or exported; an optional automatic seen, off by default, after an item's tab stays in front in the focused window for 5, 15 or 30 seconds, still a local acknowledgment only; optional OS notifications per service, off by default, with Chrome's optional `notifications` permission requested from a click, showing only the service, the reason and the session number for a new item to review in a tab not in front.
 - Ephemeral activity metadata; fresh evidence required after restart.
 - Existing manual preparations, per-record prompt retention, notes, missions, search, schema 2 export, deletion and retention kept separate.
 - French/English, themes, free MIT core, no account/API key/companion.
@@ -24,9 +24,9 @@ Initial EN/FR adapters are experimental. Manual ChatGPT selector evidence and th
 
 Evidence/leases expire logically within 15 seconds. Background throttling can yield unknown; MV3 watchdog badge cleanup is best effort. Response ready and seen do not verify task success.
 
-No stop, pause, resume, launch, automatic submission, provider approval, OS notification, native process control, other-extension inspection, backend, model API, telemetry, import or sync. Saved records/exports have no application-level encryption.
+No stop, pause, resume, launch, automatic submission, provider approval, native process control, other-extension inspection, backend, model API, telemetry, import or sync. The 0.4.0 release sends no OS notifications; unreleased source makes them opt-in per service, and a notification click only focuses through the usual revalidation. Saved records/exports have no application-level encryption.
 
-The manifest requires exactly `storage`, `sidePanel`, `alarms`, `scripting`, with the two exact optional hosts. A bundled observer is registered dynamically after a grant; no static content script or companion is shipped. [Core contract](core-contract.md) defines trust and data boundaries.
+The manifest requires exactly `storage`, `sidePanel`, `alarms`, `scripting`, with the two exact optional hosts; unreleased source adds exactly one optional permission, `notifications`, never required. A bundled observer is registered dynamically after a grant; no static content script or companion is shipped. [Core contract](core-contract.md) defines trust and data boundaries.
 
 ## Distribution and next gates
 

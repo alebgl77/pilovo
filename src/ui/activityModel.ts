@@ -44,15 +44,16 @@ export function nextElapsedTick(records: readonly WebActivityObservation[], now:
 }
 
 const position = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
-/** Row heading. The user's label comes first, with the provider kept as secondary text ("Revue contrat — Claude");
- * otherwise the worker's stable per-provider number ("Claude · session 3"), never recomputed here. A missing or malformed
- * number is left out rather than guessed. `session` is always the numbered form, which names the row's rename field.
- * The label is plain text: callers render it as a text node only. */
-export function sessionHeading(record: Pick<WebActivityObservation, 'provider' | 'sessionNumber' | 'label'>): { text: string; session: string; provider: string; label?: string } {
+/** Row heading: the worker's stable per-provider number ("Claude · session 3"), never recomputed here. The user's label
+ * comes first when set, the numbered provider kept as secondary text ("Revue contrat — Claude · session 3"): the number is
+ * what OS notifications name, never the label. A missing or malformed number is left out rather than guessed. `session`
+ * names the row's rename field and `secondary` follows a label. The label is plain text: callers render it as a text node only. */
+export function sessionHeading(record: Pick<WebActivityObservation, 'provider' | 'sessionNumber' | 'label'>): { text: string; session: string; secondary: string; label?: string } {
   const provider = WEB_PROVIDERS.find(item => item.id === record.provider)?.name ?? String(record.provider);
-  const session = Number.isSafeInteger(record.sessionNumber) && record.sessionNumber > 0 ? `${provider} · session ${record.sessionNumber}` : `${provider} · session`;
-  if (typeof record.label === 'string' && record.label.trim()) return { text: `${record.label} — ${provider}`, session, provider, label: record.label };
-  return { text: session, session, provider };
+  const numbered = Number.isSafeInteger(record.sessionNumber) && record.sessionNumber > 0 ? `${provider} · session ${record.sessionNumber}` : undefined;
+  const session = numbered ?? `${provider} · session`, secondary = numbered ?? provider;
+  if (typeof record.label === 'string' && record.label.trim()) return { text: `${record.label} — ${secondary}`, session, secondary, label: record.label };
+  return { text: session, session, secondary };
 }
 /** The worker names only live observations (current, with unexpired evidence), as for focus and seen. A row the panel
  * downgraded (expired, or unavailable while access or the snapshot is uncertain) cannot be named; a live row whose page

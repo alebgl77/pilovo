@@ -128,25 +128,26 @@ try {
   await expect(nameField('working')).toHaveAccessibleName('Nom de ChatGPT · session 1 (40 caractères au plus, vide pour l’effacer)');
   await expect(row('working').getByRole('heading', { level: 3 })).toHaveText('ChatGPT · session 1');
   await page.keyboard.type('Revue contrat'); await page.keyboard.press('Enter');
-  await expect(heading('working')).toHaveText('Revue contrat — ChatGPT'); await expect(row('working').locator('h3 .activity-provider')).toHaveText('— ChatGPT');
+  // A named row keeps its session number, the only link to its OS notifications.
+  await expect(heading('working')).toHaveText('Revue contrat — ChatGPT · session 1'); await expect(row('working').locator('h3 .activity-provider')).toHaveText('— ChatGPT · session 1');
   await expect(renameButton('working')).toBeFocused();
   expect((await labelCalls()).at(-1)).toEqual({ id: 'working', label: 'Revue contrat' });
   // Escape cancels the change and restores focus to the button.
   await page.keyboard.press('Space');
-  await expect(nameField('working')).toHaveValue('Revue contrat'); await expect(row('working').getByRole('heading', { level: 3 })).toHaveText('Revue contrat — ChatGPT');
+  await expect(nameField('working')).toHaveValue('Revue contrat'); await expect(row('working').getByRole('heading', { level: 3 })).toHaveText('Revue contrat — ChatGPT · session 1');
   await expect(nameField('working')).toHaveAccessibleName(/^Nom de ChatGPT · session 1 /);
   await page.keyboard.type('Autre nom'); await page.keyboard.press('Escape');
-  await expect(heading('working')).toHaveText('Revue contrat — ChatGPT'); await expect(renameButton('working')).toBeFocused();
+  await expect(heading('working')).toHaveText('Revue contrat — ChatGPT · session 1'); await expect(renameButton('working')).toBeFocused();
   expect(await labelCalls()).toHaveLength(1);
   await expect(page.locator('.activity-row')).toHaveCount(4);
   // Leaving the field applies the name; focus stays where the user moved it.
   await renameButton('idle').click(); await page.keyboard.type('Brouillon'); await page.keyboard.press('Tab');
-  await expect(heading('idle')).toHaveText('Brouillon — Claude');
+  await expect(heading('idle')).toHaveText('Brouillon — Claude · session 1');
   await expect(row('idle').getByRole('button', { name: 'Ouvrir la session' })).toBeFocused();
   // 40 characters at most; a long name wraps inside its row.
   await renameButton('attention').click(); await page.keyboard.type('x'.repeat(45));
   expect(await nameField('attention').inputValue()).toBe('x'.repeat(40)); await page.keyboard.press('Enter');
-  await expect(heading('attention')).toHaveText(`${'x'.repeat(40)} — ChatGPT`); await overflow();
+  await expect(heading('attention')).toHaveText(`${'x'.repeat(40)} — ChatGPT · session 2`); await overflow();
   // An empty name clears the label.
   await renameButton('idle').focus(); await page.keyboard.press('Enter'); await page.keyboard.press('Backspace'); await page.keyboard.press('Enter');
   await expect(heading('idle')).toHaveText('Claude · session 1'); expect((await labelCalls()).at(-1)).toEqual({ id: 'idle', label: null });
@@ -178,11 +179,11 @@ try {
   await page.evaluate(() => window.__activity.navigate('unsupported', 'unsupported-next'));
   await expect(row('unsupported-next')).toHaveCount(1); await expect(row('unsupported-next').getByRole('alert')).toHaveCount(0);
   await page.evaluate(() => window.__activity.rename('idle', 'Ailleurs'));
-  await expect(heading('idle')).toHaveText('Ailleurs — Claude'); await expect(row('idle').getByRole('alert')).toHaveCount(0);
+  await expect(heading('idle')).toHaveText('Ailleurs — Claude · session 1'); await expect(row('idle').getByRole('alert')).toHaveCount(0);
   await page.evaluate(() => window.__activity.rename('idle', null));
   // Labels are rendered as text, never markup.
   await page.evaluate(() => window.__activity.rename('unsupported-next', '<img src=x onerror=alert(1)>'));
-  await expect(heading('unsupported-next')).toHaveText('<img src=x onerror=alert(1)> — Claude'); await expect(row('unsupported-next').locator('h3 img')).toHaveCount(0);
+  await expect(heading('unsupported-next')).toHaveText('<img src=x onerror=alert(1)> — Claude · session 2'); await expect(row('unsupported-next').locator('h3 img')).toHaveCount(0);
   pass('rename by keyboard: Enter applies, Escape cancels, leaving the field applies, empty clears, 40-character limit, refused characters keep the field open on Enter or leaving it, failures announced and cleared by a new observation or name, text-only rendering');
 
   // Polling and a navigation in the same tab keep the open field, its text and focus; the save names the tab's current observation.
@@ -195,7 +196,7 @@ try {
   await expect(nameField('working-next')).toBeFocused(); await expect(nameField('working-next')).toHaveValue('Partiel');
   await audit('activity-rename-open-French');
   await page.keyboard.press('Enter');
-  await expect(heading('working-next')).toHaveText('Partiel — ChatGPT'); await expect(renameButton('working-next')).toBeFocused();
+  await expect(heading('working-next')).toHaveText('Partiel — ChatGPT · session 1'); await expect(renameButton('working-next')).toBeFocused();
   expect((await labelCalls()).at(-1)).toEqual({ id: 'working-next', label: 'Partiel' });
   await audit('activity-session-identity-French');
   // Rows follow their tab, so a row error must not outlive its observation: a navigation clears it.
@@ -367,12 +368,12 @@ try {
   await expect(place('attention')).toHaveText('Tab 1 · other window');
   await audit('activity-360-dark-English'); await overflow(); await quietDurations(); await screenshot('activity_360_dark');
   await page.evaluate(() => window.__activity.rename('attention', 'W'.repeat(40)));
-  await expect(heading('attention')).toHaveText(`${'W'.repeat(40)} — ChatGPT`); await overflow();
+  await expect(heading('attention')).toHaveText(`${'W'.repeat(40)} — ChatGPT · session 2`); await overflow();
   expect(await heading('attention').evaluate(element => element.getBoundingClientRect().right <= element.closest('.activity-row').getBoundingClientRect().right + 1)).toBe(true);
   await renameButton('working', 'Name this session').focus(); await page.keyboard.press('Enter');
   await expect(nameField('working', 'Name for ChatGPT · session 1 (40 characters maximum, empty to clear)')).toBeFocused(); await page.keyboard.type('Contract review');
   await audit('activity-360-dark-English-rename'); await overflow(); expect(await clearLines(page, 'working')).toBe(true);
-  await page.keyboard.press('Enter'); await expect(heading('working')).toHaveText('Contract review — ChatGPT');
+  await page.keyboard.press('Enter'); await expect(heading('working')).toHaveText('Contract review — ChatGPT · session 1');
   await expect(renameButton('working', 'Name this session')).toBeFocused();
   await renameButton('working', 'Name this session').click(); await page.keyboard.insertText('a\u2066b'); await page.keyboard.press('Enter');
   await expect(row('working').getByRole('alert')).toContainText('This name cannot be used'); await page.keyboard.press('Escape');
@@ -391,7 +392,7 @@ try {
   await page.evaluate(() => window.__activity.since('attention', 30_000));
   await expect(elapsed('attention')).toHaveText('Réponse disponible depuis moins d’une minute');
   await page.evaluate(() => window.__activity.rename('attention-2', 'Revue contrat'));
-  await expect(heading('attention-2')).toHaveText('Revue contrat — Claude'); await expect(place('attention-2')).toHaveText('Onglet 6');
+  await expect(heading('attention-2')).toHaveText('Revue contrat — Claude · session 3'); await expect(place('attention-2')).toHaveText('Onglet 6');
   await audit('activity-360-light-French'); await overflow(); await quietDurations();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   expect(await page.locator('.button').first().evaluate(element => getComputedStyle(element).transitionDuration)).toBe('0s');
@@ -436,6 +437,82 @@ try {
   await page.evaluate(() => window.__activity.settings({ language: 'fr', theme: 'light' })); await page.setViewportSize({ width: 360, height: 900 });
   await expect(page.getByRole('heading', { name: 'Activité', exact: true })).toBeVisible();
   pass('automatic seen setting: off by default, labeled select with its meaning as description, FR/EN, light/dark, 1365px and 360px, zero axe violations; the activity footer states the delay only when enabled');
+
+  // Settings: optional OS notifications, one checkbox per service. Chrome's permission is requested from the click itself,
+  // only for the first service, and removed with the last; a refusal changes nothing and is announced.
+  const notifyCalls = () => page.evaluate(() => window.__activity.calls().notifications);
+  const notifySaved = () => page.evaluate(() => window.__activity.savedSettings().notifyProviders);
+  const notifyText = {
+    fr: { group: 'Notifications système', help: 'Pilovo affiche une notification de votre système quand une réponse est disponible, qu’une intervention est demandée ou qu’une erreur est visible. Elle contient seulement le service, le motif et le numéro de session. Votre système peut la conserver dans son centre de notifications.', refused: 'Chrome n’a pas autorisé les notifications. Le réglage n’a pas changé.', removed: 'Chrome n’autorise plus les notifications de Pilovo : aucun service ne vous notifie. Cochez un service pour les réactiver.', unavailable: 'Les notifications système nécessitent l’extension Chrome installée.', unknown: 'L’autorisation des notifications n’a pas pu être vérifiée.', saved: 'Préférences enregistrées.' },
+    en: { group: 'System notifications', help: 'Pilovo shows a system notification when a response is available, input is requested or an error is visible. It contains only the service, the reason and the session number. Your system may keep it in its notification center.', refused: 'Chrome did not allow notifications. The setting is unchanged.', removed: 'Chrome no longer allows Pilovo notifications, so no service notifies you. Check a service to turn them back on.', unavailable: 'System notifications require the installed Chrome extension.', unknown: 'The notification permission could not be checked.', saved: 'Preferences saved.' },
+  };
+  for (const [width, theme, language] of [[1365, 'light', 'fr'], [360, 'dark', 'fr'], [360, 'dark', 'en']]) {
+    const text = notifyText[language];
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(([value, lang]) => { window.__activity.denyNotifications(false); window.__activity.notificationPermission(false); window.__activity.settings({ language: lang, theme: value, notifyProviders: [] }); }, [theme, language]);
+    await nav(language === 'fr' ? 'Paramètres' : 'Settings').click();
+    const group = page.getByRole('group', { name: text.group, exact: true }), state = group.locator('.notify-state');
+    const claude = group.getByRole('checkbox', { name: 'Claude', exact: true }), chatgpt = group.getByRole('checkbox', { name: 'ChatGPT', exact: true });
+    await expect(group).toHaveAccessibleDescription(text.help);
+    await expect(claude).toBeEnabled(); await expect(claude).not.toBeChecked(); await expect(chatgpt).not.toBeChecked(); await expect(state).toHaveCount(0);
+    await audit(`settings-notifications-${width}-${theme}-${language}`); await overflow();
+    const asked = (await notifyCalls()).length, saved = page.getByRole('status').filter({ hasText: text.saved });
+    // Granted, from the keyboard: the first service requests the permission inside the key press's user gesture, and the
+    // checkbox keeps focus while the request and the save run.
+    await claude.focus(); await page.keyboard.press('Space'); await expect.poll(notifySaved).toEqual(['claude-web']); await expect(claude).toBeChecked();
+    await expect(saved).toBeVisible(); await expect(claude).toBeFocused();
+    expect((await notifyCalls()).slice(asked)).toEqual([{ kind: 'request', gesture: true }]);
+    await chatgpt.click(); await expect.poll(notifySaved).toEqual(['claude-web', 'chatgpt-web']); await expect(chatgpt).toBeChecked();
+    await claude.click(); await expect.poll(notifySaved).toEqual(['chatgpt-web']); await expect(claude).not.toBeChecked();
+    expect((await notifyCalls()).slice(asked)).toHaveLength(1);
+    // The last one unchecked removes the permission.
+    await chatgpt.click(); await expect.poll(notifySaved).toEqual([]); await expect(chatgpt).not.toBeChecked();
+    await expect.poll(async () => (await notifyCalls()).slice(asked).map(call => call.kind)).toEqual(['request', 'remove']);
+    // Refused, from the keyboard: the setting stays unchanged, the refusal is announced, the previous save's status goes
+    // and focus stays on the checkbox.
+    await expect(saved).toBeVisible();
+    await page.evaluate(() => window.__activity.denyNotifications(true));
+    await chatgpt.focus(); await page.keyboard.press('Space'); await expect(group.getByRole('alert')).toHaveText(text.refused);
+    await expect(chatgpt).not.toBeChecked(); expect(await notifySaved()).toEqual([]); await expect(saved).toHaveCount(0); await expect(chatgpt).toBeFocused();
+    expect((await notifyCalls()).at(-1)).toEqual({ kind: 'request', gesture: true });
+    // A request that rejects or throws counts as a refusal.
+    await page.evaluate(() => window.__activity.denyNotifications(false));
+    for (const failure of ['reject', 'throw']) {
+      await page.evaluate(value => window.__activity.failNotificationRequest(value), failure);
+      const before = (await notifyCalls()).length;
+      await claude.click(); await expect.poll(async () => (await notifyCalls()).length).toBe(before + 1);
+      await expect(group.getByRole('alert')).toHaveText(text.refused); await expect(claude).not.toBeChecked(); expect(await notifySaved()).toEqual([]);
+    }
+    await page.evaluate(() => window.__activity.failNotificationRequest(null));
+    await audit(`settings-notifications-refused-${width}-${theme}-${language}`); await overflow();
+    // Removed in Chrome's settings: both read as off, with an explanation; checking one re-enables that one only.
+    await page.evaluate(() => { window.__activity.denyNotifications(false); window.__activity.settings({ notifyProviders: ['claude-web', 'chatgpt-web'] }); window.__activity.notificationPermission(true); });
+    await expect(claude).toBeChecked(); await expect(chatgpt).toBeChecked(); await expect(group.getByRole('alert')).toHaveCount(0);
+    await page.evaluate(() => window.__activity.notificationPermission(false));
+    await expect(claude).not.toBeChecked(); await expect(chatgpt).not.toBeChecked();
+    await expect(state).toHaveText(text.removed); await expect(group).toHaveAccessibleDescription(`${text.help} ${text.removed}`);
+    await audit(`settings-notifications-removed-${width}-${theme}-${language}`); await overflow();
+    await claude.click(); await expect.poll(notifySaved).toEqual(['claude-web']);
+    await expect(claude).toBeChecked(); await expect(chatgpt).not.toBeChecked(); await expect(state).toHaveCount(0);
+    expect((await notifyCalls()).at(-1)).toEqual({ kind: 'request', gesture: true });
+    // The permission cannot be read: both boxes are disabled, and the group's description says why.
+    await page.evaluate(() => window.__activity.failNotificationRead(true));
+    await expect(state).toHaveText(text.unknown); for (const box of [claude, chatgpt]) await expect(box).toBeDisabled();
+    await expect(group).toHaveAccessibleDescription(`${text.help} ${text.unknown}`);
+    await audit(`settings-notifications-unknown-${width}-${theme}-${language}`); await overflow();
+    await page.evaluate(() => window.__activity.failNotificationRead(false));
+    await expect(claude).toBeEnabled(); await expect(claude).toBeChecked(); await expect(state).toHaveCount(0);
+  }
+  // The browser preview has no permission methods: the checkboxes are disabled and say why.
+  await page.evaluate(() => window.__activity.noNotifications());
+  const previewGroup = page.getByRole('group', { name: notifyText.en.group, exact: true });
+  for (const name of ['Claude', 'ChatGPT']) { await expect(previewGroup.getByRole('checkbox', { name, exact: true })).toBeDisabled(); await expect(previewGroup.getByRole('checkbox', { name, exact: true })).not.toBeChecked(); }
+  await expect(previewGroup.locator('.notify-state')).toHaveText(notifyText.en.unavailable);
+  await expect(previewGroup).toHaveAccessibleDescription(`${notifyText.en.help} ${notifyText.en.unavailable}`);
+  await audit('settings-notifications-preview-360-dark-en'); await overflow();
+  await page.evaluate(() => window.__activity.settings({ language: 'fr', theme: 'light', notifyProviders: [] })); await page.setViewportSize({ width: 360, height: 900 });
+  await nav('Activité').click(); await expect(page.getByRole('heading', { name: 'Activité', exact: true })).toBeVisible();
+  pass('system notifications setting: one checkbox per service, permission requested inside the click or key press and removed with the last service, keyboard focus kept, refusal (or a failed request) announced without change and without a stale saved status, removal in Chrome shown as off with re-enable, unreadable permission and preview disabled with their reason, FR/EN, 1365px and 360px, light/dark, zero axe violations');
 
   // Seen elsewhere (automatic seen after dwelling on the tab, the keyboard command or another panel) removes the control
   // that had focus: focus moves to the row's open button, or from mark all to the first row action, never to the page.
@@ -503,8 +580,12 @@ try {
   await expect(touchPage.locator('[data-activity-id="attention"] .activity-place')).toHaveText('Onglet 1 · autre fenêtre');
   await touchPage.evaluate(() => window.__activity.noWindow());
   await expect(touchPage.locator('[data-activity-id="attention"] .activity-place')).toHaveText('Onglet 1');
+  // The notification checkboxes' labels are their targets: 44 px tall on coarse pointers.
+  await touchPage.getByRole('navigation').getByRole('button', { name: 'Paramètres', exact: true }).click();
+  const notifyTargets = await touchPage.locator('.notify-options .checkbox-label').evaluateAll(labels => labels.map(label => label.getBoundingClientRect().height));
+  expect(notifyTargets).toHaveLength(2); expect(Math.min(...notifyTargets)).toBeGreaterThanOrEqual(44);
   await touch.close();
-  pass('mark all, row actions, rename button and field keep 44 px coarse-pointer targets at 1200px and 360px, clear of the state and position lines; no window claim without the panel window');
+  pass('mark all, row actions, rename button and field, and the notification checkboxes keep 44 px coarse-pointer targets at 1200px and 360px, clear of the state and position lines; no window claim without the panel window');
   expect(report.errors).toEqual([]);
 } catch (error) { report.failure = String(error); await page.screenshot({ path: path.join(output, 'Pilovo-activity-failure-synthetic.png'), fullPage: true }); throw error; }
 finally { await writeFile(path.join(output, 'Pilovo-activity-report.json'), JSON.stringify(report, null, 2)); await browser.close(); }

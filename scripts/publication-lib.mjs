@@ -40,8 +40,9 @@ export function validateManifest(manifest, metadata, lock) {
   if (!/^\d+\.\d+\.\d+$/.test(metadata.version) || metadata.name !== 'pilovo') throw new Error('Expected Pilovo numeric release version.');
   if (manifest.manifest_version !== 3 || manifest.version !== metadata.version || manifest.background?.service_worker !== 'background.js') throw new Error('Built MV3 manifest/version mismatch.');
   if (lock.version !== metadata.version || lock.packages?.['']?.version !== metadata.version || lock.name !== metadata.name || lock.packages?.['']?.name !== metadata.name) throw new Error('Lock metadata mismatch.');
-  if (!sameSet(manifest.permissions, ['storage', 'sidePanel', 'alarms', 'scripting']) || !sameSet(manifest.optional_host_permissions, ['https://claude.ai/*', 'https://chatgpt.com/*'])) throw new Error('Permission contract mismatch.');
-  if ((manifest.host_permissions || []).length || (manifest.optional_permissions || []).length || ['content_scripts', 'externally_connectable'].some(key => key in manifest)) throw new Error('Unsupported permission/code channel.');
+  // The only optional API permission is notifications, requested from a user action for opt-in OS notifications.
+  if (!sameSet(manifest.permissions, ['storage', 'sidePanel', 'alarms', 'scripting']) || !sameSet(manifest.optional_host_permissions, ['https://claude.ai/*', 'https://chatgpt.com/*']) || !sameSet(manifest.optional_permissions, ['notifications'])) throw new Error('Permission contract mismatch.');
+  if ((manifest.host_permissions || []).length || ['content_scripts', 'externally_connectable'].some(key => key in manifest)) throw new Error('Unsupported permission/code channel.');
   if (manifest.content_security_policy?.extension_pages !== "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'") throw new Error('Extension code must stay local.');
 }
 export function validateChromeFiles(files) {

@@ -33,7 +33,9 @@ export interface TaskRun {
   verificationChecks: VerificationCheck[];
 }
 // autoAcknowledgeSeconds: optional automatic seen after dwelling on the tab, 0 (off) by default; older stored settings lack it.
-export interface Settings { language: 'fr' | 'en'; theme: 'system' | 'light' | 'dark'; retentionDays: number; retainPrompts: boolean; notifications: boolean; bridgeEnabled: boolean; autoAcknowledgeSeconds: AutoAcknowledgeSeconds }
+// notifyProviders: services with optional OS notifications, [] (off) by default; older stored settings lack it. The legacy
+// notifications flag belongs to the historical native agents and stays false.
+export interface Settings { language: 'fr' | 'en'; theme: 'system' | 'light' | 'dark'; retentionDays: number; retainPrompts: boolean; notifications: boolean; bridgeEnabled: boolean; autoAcknowledgeSeconds: AutoAcknowledgeSeconds; notifyProviders: WebProvider[] }
 export interface Connector {
   id: SourceId; name: string; connection: Connection; maturity: 'proof-of-concept'; protocolVersion: 1;
   adapterVersion: string; testedVersion: string | null; lastVerifiedAt: string | null; lastSeenAt?: string;
@@ -57,6 +59,10 @@ export interface HubClient {
   getWebDiscovery?(): Promise<WebDiscovery>;
   requestWebDiscoveryPermission?(provider?: WebProvider): Promise<boolean>;
   removeWebDiscoveryPermission?(provider?: WebProvider): Promise<boolean>;
+  // Optional OS notifications: Chrome's optional notifications permission, read and changed from the UI only.
+  hasNotificationPermission?(): Promise<boolean>;
+  requestNotificationPermission?(): Promise<boolean>;
+  removeNotificationPermission?(): Promise<boolean>;
   createWebPreparation?(input: WebPreparationInput): Promise<WebPreparation>;
   updateWebPreparation?(id: string, patch: WebPreparationPatch): Promise<WebPreparation>;
   deleteWebPreparation?(id: string): Promise<void>;

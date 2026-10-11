@@ -211,7 +211,7 @@ function SessionName({ record, heading, live, api, en, refresh }: { record: WebA
   const message = problem === 'invalid'
     ? en ? `This name cannot be used. Use plain text of up to ${ACTIVITY_LABEL_MAX} characters, without control characters.` : `Ce nom ne peut pas être utilisé. Saisissez du texte simple de ${ACTIVITY_LABEL_MAX} caractères au plus, sans caractère de contrôle.`
     : en ? 'This name could not be applied. The session may have changed or closed; refresh activity.' : 'Ce nom n’a pas pu être appliqué. La session a peut-être changé ou été fermée ; actualisez l’activité.';
-  const title = heading.label === undefined ? heading.text : <><bdi>{heading.label}</bdi><span className="activity-provider"> — {heading.provider}</span></>;
+  const title = heading.label === undefined ? heading.text : <><bdi>{heading.label}</bdi><span className="activity-provider"> — {heading.secondary}</span></>;
   return <>
     <div className="activity-heading">
       {/* While the field is open, the row keeps its heading for screen readers, and the field's name says which session it renames. */}

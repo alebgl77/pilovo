@@ -18,7 +18,9 @@ beforeEach(async () => {
     permissions: { contains: vi.fn().mockResolvedValue(true), request: vi.fn(), onRemoved: signal(), onAdded: signal() },
     tabs: { query: vi.fn().mockResolvedValue([{ id: 4, windowId: 1, url: 'https://claude.ai/chat/private', title: 'Private title' }]), get: vi.fn(), create: vi.fn().mockResolvedValue({ id: 5 }), update: vi.fn(), onCreated: signal(), onUpdated: signal(), onRemoved: signal(), onMoved: signal(), onAttached: signal(), onDetached: signal(), onReplaced: signal(), onActivated: signal() },
     scripting: { registerContentScripts: vi.fn().mockResolvedValue(undefined), unregisterContentScripts: vi.fn().mockResolvedValue(undefined), executeScript: vi.fn().mockResolvedValue([]) },
-    windows: { update: vi.fn(), getLastFocused: vi.fn().mockResolvedValue({ id: 3 }), onFocusChanged: signal() }, commands: { onCommand: signal(), getAll: vi.fn() }, alarms: { create: vi.fn().mockResolvedValue(undefined), onAlarm: signal() }, sidePanel: { setPanelBehavior: vi.fn().mockResolvedValue(undefined), open: vi.fn().mockResolvedValue(undefined) }, action: { onClicked: signal(), setBadgeText: vi.fn().mockResolvedValue(undefined), setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined), setBadgeTextColor: vi.fn().mockResolvedValue(undefined), setTitle: vi.fn().mockResolvedValue(undefined) },
+    windows: { update: vi.fn(), getLastFocused: vi.fn().mockResolvedValue({ id: 3 }), onFocusChanged: signal() },
+    // The optional notifications API, present as if the permission were granted; tests remove it to model the opposite.
+    notifications: { create: vi.fn().mockResolvedValue('created'), clear: vi.fn().mockResolvedValue(true), getAll: vi.fn().mockResolvedValue({}), onClicked: signal(), onClosed: signal() }, commands: { onCommand: signal(), getAll: vi.fn() }, alarms: { create: vi.fn().mockResolvedValue(undefined), onAlarm: signal() }, sidePanel: { setPanelBehavior: vi.fn().mockResolvedValue(undefined), open: vi.fn().mockResolvedValue(undefined) }, action: { onClicked: signal(), setBadgeText: vi.fn().mockResolvedValue(undefined), setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined), setBadgeTextColor: vi.fn().mockResolvedValue(undefined), setTitle: vi.fn().mockResolvedValue(undefined) },
   };
   vi.stubGlobal('chrome', api);
   const { HubRepository } = await import('../../src/domain/repository'); const seed = new HubRepository(); await seed.snapshot(); await seed.close();
@@ -377,6 +379,138 @@ describe('standalone service worker trust boundary', () => {
     replies[0]({ ...settings, autoAcknowledgeSeconds: 5 }); expect((await older).ok).toBe(true);
     await vi.advanceTimersByTimeAsync(30_000); expect(await attention()).toMatchObject({ reason: 'error_visible', acknowledged: false });
     spy.mockRestore();
+  });
+  it('accepts notifyProviders only as a strict, unique list of services, default empty, and never asks Chrome while it is empty', async () => {
+    expect((await rpc({ method: 'getSnapshot' })).data.settings.notifyProviders).toEqual([]);
+    for (const invalid of [['claude-web', 'claude-web'], ['claude-code'], ['claude-web', 'chatgpt-web', 'claude-web'], 'claude-web', null, true, [1], [{ id: 'claude-web' }]]) {
+      const request = { method: 'updateSettings', patch: { notifyProviders: invalid } };
+      expect(rpcSchema.safeParse(request).success, JSON.stringify(invalid)).toBe(false); expect(await rpc(request)).toMatchObject({ ok: false, error: { code: 'validation.invalid' } });
+    }
+    for (const valid of [[], ['claude-web'], ['chatgpt-web', 'claude-web']]) expect((await rpc({ method: 'updateSettings', patch: { notifyProviders: valid } })).data.notifyProviders).toEqual(valid);
+    expect(api.permissions.contains.mock.calls.some(([query]: any[]) => query.permissions)).toBe(false); expect(api.notifications.create).not.toHaveBeenCalled();
+  });
+  it('shows an opt-in notification with fixed content only, focuses on click without acknowledging, and clears it on seen or permission removal', async () => {
+    const activationId = crypto.randomUUID(), tab = { id: 4, windowId: 1, index: 2, url: 'https://claude.ai/chat/private', title: 'Private title', status: 'complete' };
+    let evidence = 'working', permitted = true;
+    api.permissions.contains.mockImplementation(async (query: any) => query.permissions ? permitted : true);
+    api.tabs.get.mockResolvedValue(tab);
+    // The focused window's active tab is another one (the full-page panel, say): the Claude tab is not viewed.
+    api.windows.getLastFocused.mockResolvedValue({ id: 1, focused: true });
+    api.tabs.query.mockImplementation(async (query: any) => query.active ? [{ id: 9, windowId: 1, active: true }] : [tab]);
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence } }] : []);
+    const sample = async (value: string) => { evidence = value; api.tabs.onUpdated.emit(4, { status: 'complete' }, tab); await vi.advanceTimersByTimeAsync(1100); };
+    const observation = async () => (await rpc({ method: 'getWebActivity' })).data.observations[0];
+    await rpc({ method: 'updateSettings', patch: { notifyProviders: ['claude-web'] } });
+    await sample('working'); await rpc({ method: 'labelWebActivity', id: (await observation()).id, label: 'PRIVATE_LABEL_CANARY' });
+    await sample('input_required');
+    const raised = await observation(), id = `pilovo:${raised.id}:${raised.attention.id}`;
+    expect(api.notifications.create).toHaveBeenCalledExactlyOnceWith(id, { type: 'basic', iconUrl: 'chrome-extension://test-extension/icons/icon128.png', title: 'Claude', message: 'Intervention demandée · session 1', contextMessage: 'Pilovo', priority: 0, requireInteraction: false });
+    expect(api.permissions.contains).toHaveBeenCalledWith({ permissions: ['notifications'] });
+    expect(JSON.stringify(api.notifications.create.mock.calls)).not.toMatch(/PRIVATE|private|https:/);
+    // A click: the ordinary revalidated focus, the notification cleared, the attention still to review.
+    api.notifications.onClicked.emit(id); await vi.advanceTimersByTimeAsync(1100);
+    await vi.waitFor(() => expect(api.windows.update).toHaveBeenCalledWith(1, { focused: true }));
+    expect(api.tabs.update).toHaveBeenCalledExactlyOnceWith(4, { active: true }); expect(api.notifications.clear).toHaveBeenCalledWith(id);
+    expect((await observation()).attention).toEqual(raised.attention); expect(api.action.setBadgeText).toHaveBeenLastCalledWith({ text: '1' });
+    // Malformed IDs are ignored entirely.
+    api.notifications.clear.mockClear(); for (const malformed of ['pilovo:x:y', 'other', '']) api.notifications.onClicked.emit(malformed);
+    await vi.advanceTimersByTimeAsync(1100); expect(api.notifications.clear).not.toHaveBeenCalled(); expect(api.tabs.update).toHaveBeenCalledOnce();
+    // In English, a new attention replaces it; a manual seen clears it.
+    await rpc({ method: 'updateSettings', patch: { language: 'en' } }); await sample('error_visible');
+    const replaced = await observation(), second = `pilovo:${replaced.id}:${replaced.attention.id}`;
+    expect(api.notifications.create).toHaveBeenLastCalledWith(second, expect.objectContaining({ title: 'Claude', message: 'Error visible · session 1' }));
+    await rpc({ method: 'acknowledgeWebActivity', id: replaced.id, attentionId: replaced.attention.id }); await vi.advanceTimersByTimeAsync(0);
+    expect(api.notifications.clear).toHaveBeenLastCalledWith(second);
+    // Removed in Chrome's settings: as in Chrome, notification calls are then refused, so the worker forgets its notification
+    // and creates no new one; the removal alone tells open panels to re-read the permission.
+    await sample('working'); await sample('input_required'); const third = `pilovo:${(await observation()).id}:${(await observation()).attention.id}`;
+    expect(api.notifications.create).toHaveBeenLastCalledWith(third, expect.anything());
+    await vi.advanceTimersByTimeAsync(250); api.runtime.sendMessage.mockClear();
+    const refused = (name: string) => () => Promise.reject(new Error(`'notifications.${name}' is not available in this context`));
+    permitted = false; for (const name of ['create', 'clear', 'getAll']) api.notifications[name].mockImplementation(refused(name));
+    api.permissions.onRemoved.emit({ permissions: ['notifications'], origins: [] }); await vi.advanceTimersByTimeAsync(250);
+    expect(api.runtime.sendMessage).toHaveBeenCalledExactlyOnceWith({ channel: 'hub.changed' });
+    expect(api.notifications.clear).toHaveBeenLastCalledWith(third); expect((await observation()).state).toBe('attention');
+    const shown = api.notifications.create.mock.calls.length;
+    await sample('working'); await sample('error_visible'); expect(api.notifications.create).toHaveBeenCalledTimes(shown);
+    // Granted again: what Chrome kept on screen meanwhile is cleared, and the attention raised after it is notified.
+    permitted = true; api.notifications.create.mockResolvedValue('created'); api.notifications.getAll.mockResolvedValue({ [third]: true, other: true });
+    api.notifications.clear.mockReset(); api.notifications.clear.mockResolvedValue(true);
+    api.permissions.onAdded.emit({ permissions: ['notifications'], origins: [] }); await vi.advanceTimersByTimeAsync(0);
+    expect(api.notifications.clear).toHaveBeenCalledExactlyOnceWith(third);
+    await sample('working'); await sample('input_required'); const fourth = `pilovo:${(await observation()).id}:${(await observation()).attention.id}`;
+    expect(api.notifications.create).toHaveBeenLastCalledWith(fourth, expect.anything());
+    // Unchecking the last service: the reply waits until Chrome has cleared the notification, so the permission removal the
+    // page makes next cannot overtake that clear.
+    let clear!: () => void; api.notifications.clear.mockImplementation(() => new Promise(resolve => { clear = () => resolve(true); }));
+    let replied = false; const reply = rpc({ method: 'updateSettings', patch: { notifyProviders: [] } }).then(result => { replied = true; return result; });
+    await vi.waitFor(() => expect(api.notifications.clear).toHaveBeenLastCalledWith(fourth)); await vi.advanceTimersByTimeAsync(100);
+    expect(replied).toBe(false); clear(); expect((await reply).data.notifyProviders).toEqual([]);
+  });
+  it('does not notify the viewed tab or a service left off, and applies the setting at startup and in call order', async () => {
+    const activationId = crypto.randomUUID(), tab = { id: 4, windowId: 1, url: 'https://claude.ai/chat/private', status: 'complete' };
+    let evidence = 'working', active = 4;
+    api.tabs.get.mockResolvedValue(tab); api.windows.getLastFocused.mockResolvedValue({ id: 1, focused: true });
+    api.tabs.query.mockImplementation(async (query: any) => query.active ? [{ id: active, windowId: 1, active: true }] : [tab]);
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence } }] : []);
+    const sample = async (value: string) => { evidence = value; api.tabs.onUpdated.emit(4, { status: 'complete' }, tab); await vi.advanceTimersByTimeAsync(1100); };
+    await rpc({ method: 'updateSettings', patch: { notifyProviders: ['chatgpt-web'] } }); await sample('input_required');
+    await rpc({ method: 'updateSettings', patch: { notifyProviders: ['claude-web'] } }); await sample('working'); await sample('error_visible');
+    expect(api.notifications.create).not.toHaveBeenCalled();
+    // A restarted worker reads the setting before any evidence; the tab is no longer the viewed one.
+    for (const area of [api.runtime, api.permissions, api.tabs, api.windows, api.commands, api.alarms, api.action, api.notifications]) for (const key of Object.keys(area)) if (/^on[A-Z]/.test(key)) area[key] = signal();
+    active = 9; vi.resetModules(); await import('../../src/background/index'); expect((await rpc({ method: 'getSnapshot' })).data.settings.notifyProviders).toEqual(['claude-web']);
+    await sample('error_visible'); expect(api.notifications.create).toHaveBeenCalledOnce();
+    // Two calls whose replies arrive in reverse order: the older one cannot restore its services over the newer one.
+    const { HubRepository } = await import('../../src/domain/repository');
+    const settings = (await rpc({ method: 'getSnapshot' })).data.settings, replies: ((value: unknown) => void)[] = [];
+    const spy = vi.spyOn(HubRepository.prototype, 'updateSettings').mockImplementation(() => new Promise(resolve => { replies.push(resolve); }) as never);
+    const older = rpc({ method: 'updateSettings', patch: { notifyProviders: ['claude-web'] } }), newer = rpc({ method: 'updateSettings', patch: { notifyProviders: [] } });
+    await vi.waitFor(() => expect(replies).toHaveLength(2));
+    replies[1]({ ...settings, notifyProviders: [] }); expect((await newer).ok).toBe(true);
+    replies[0]({ ...settings, notifyProviders: ['claude-web'] }); expect((await older).ok).toBe(true);
+    expect(api.notifications.clear).toHaveBeenCalledOnce();
+    await sample('working'); await sample('input_required'); expect(api.notifications.create).toHaveBeenCalledOnce();
+    spy.mockRestore();
+  });
+  it('applies the stored services before the activity alarm that woke the worker samples, so the first attention is notified', async () => {
+    const activationId = crypto.randomUUID(), tab = { id: 4, windowId: 1, index: 0, url: 'https://claude.ai/chat/private', status: 'complete' };
+    api.tabs.get.mockResolvedValue(tab); api.windows.getLastFocused.mockResolvedValue({ id: 1, focused: true });
+    api.tabs.query.mockImplementation(async (query: any) => query.active ? [{ id: 9, windowId: 1, active: true }] : [tab]);
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence: 'input_required' } }] : []);
+    expect((await rpc({ method: 'updateSettings', patch: { notifyProviders: ['claude-web'] } })).ok).toBe(true);
+    // This worker life stops observing (its grants end), then a new life is woken by the activity alarm while its stored
+    // settings are still being read (a cold IndexedDB).
+    api.permissions.onRemoved.emit({ origins: WEB_ORIGINS }); await vi.advanceTimersByTimeAsync(3000);
+    api.scripting.executeScript.mockClear(); api.notifications.create.mockClear();
+    for (const area of [api.runtime, api.permissions, api.tabs, api.windows, api.commands, api.alarms, api.action, api.notifications]) for (const key of Object.keys(area)) if (/^on[A-Z]/.test(key)) area[key] = signal();
+    vi.resetModules();
+    const { HubRepository } = await import('../../src/domain/repository'), original = HubRepository.prototype.updateSettings;
+    let release!: () => void; const opened = new Promise<void>(resolve => { release = resolve; });
+    const spy = vi.spyOn(HubRepository.prototype, 'updateSettings').mockImplementation(async function (this: InstanceType<typeof HubRepository>, patch) { await opened; return original.call(this, patch); });
+    await import('../../src/background/index');
+    api.alarms.onAlarm.emit({ name: 'pilovo-activity' }); await vi.advanceTimersByTimeAsync(3000);
+    expect(api.scripting.executeScript).not.toHaveBeenCalled(); expect(api.notifications.create).not.toHaveBeenCalled();
+    release(); expect((await rpc({ method: 'getSnapshot' })).data.settings.notifyProviders).toEqual(['claude-web']); await vi.advanceTimersByTimeAsync(3000);
+    expect((await rpc({ method: 'getWebActivity' })).data.observations[0].attention).toMatchObject({ reason: 'input_required' });
+    expect(api.notifications.create).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^pilovo:/), expect.objectContaining({ title: 'Claude', message: 'Intervention demandée · session 1' }));
+    spy.mockRestore();
+  });
+  it('listens for notification clicks once the permission is granted after startup, and clears a previous life’s notifications', async () => {
+    const left = `pilovo:${crypto.randomUUID()}:${crypto.randomUUID()}`, notifications = api.notifications;
+    // Startup without the permission: chrome.notifications does not exist yet.
+    for (const area of [api.runtime, api.permissions, api.tabs, api.windows, api.commands, api.alarms, api.action]) for (const key of Object.keys(area)) if (/^on[A-Z]/.test(key)) area[key] = signal();
+    delete api.notifications; vi.resetModules(); await import('../../src/background/index'); expect((await rpc({ method: 'getSnapshot' })).ok).toBe(true);
+    notifications.onClicked = signal(); notifications.onClosed = signal(); notifications.getAll.mockResolvedValue({ [left]: true }); notifications.clear.mockClear();
+    api.notifications = notifications;
+    api.permissions.onAdded.emit({ permissions: ['notifications'], origins: [] }); api.permissions.onAdded.emit({ permissions: ['notifications'] });
+    expect(notifications.onClicked.addListener).toHaveBeenCalledOnce(); expect(notifications.onClosed.addListener).toHaveBeenCalledOnce();
+    // A click on a notification this worker life does not know: focus fails, it is cleared.
+    notifications.onClicked.emit(left); await vi.advanceTimersByTimeAsync(0); expect(notifications.clear).toHaveBeenCalledWith(left); expect(api.tabs.update).not.toHaveBeenCalled();
+    // A restarted worker with the permission clears what the previous life left, without creating anything.
+    for (const area of [api.runtime, api.permissions, api.tabs, api.windows, api.commands, api.alarms, api.action, api.notifications]) for (const key of Object.keys(area)) if (/^on[A-Z]/.test(key)) area[key] = signal();
+    notifications.clear.mockClear(); vi.resetModules(); await import('../../src/background/index'); await vi.advanceTimersByTimeAsync(0);
+    expect(notifications.clear).toHaveBeenCalledExactlyOnceWith(left); expect(notifications.create).not.toHaveBeenCalled(); expect(notifications.onClicked.addListener).toHaveBeenCalledOnce();
   });
   it('permits fixed provider opening after denial and refuses removed generic tab capability', async () => {
     api.permissions.contains.mockResolvedValue(false); expect((await rpc({ method: 'openWebProvider', provider: 'chatgpt-web' })).ok).toBe(true); expect(api.tabs.create).toHaveBeenCalledWith({ url: 'https://chatgpt.com/', active: true });
