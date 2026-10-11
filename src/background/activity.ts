@@ -31,6 +31,7 @@ export class WebActivity {
   private readonly slots = new Map<number, Slot>();
   private readonly sequences = new Map<number, { documentId: string; activationId: string; sequence: number }>();
   private expiry?: ReturnType<typeof setTimeout>;
+  private focusing?: Promise<'focused' | 'none' | 'failed'>;
   private badgeQueue = Promise.resolve();
   private available = true;
   constructor(private readonly access: ActivityAccess) { this.paintBadge(''); }
@@ -189,7 +190,8 @@ export class WebActivity {
     this.expire();
     return { availability: this.available ? 'available' : 'unavailable', observations: [...this.records.values()].map(record => structuredClone(record.observation)), observedAt: this.access.wall() };
   }
-  async focus(id: string) {
+  /** With attentionId (keyboard command), the fresh sample must still show that unacknowledged attention. */
+  async focus(id: string, attentionId?: string) {
     this.expire();
     const record = [...this.records.values()].find(item => item.observation.id === id);
     if (!record || record.observation.validUntil <= this.access.now()) throw new HubError('navigation.expired');
@@ -197,13 +199,19 @@ export class WebActivity {
     const slot = this.slots.get(tabId), grant = this.grants.get(provider)!;
     if (!slot || slot.inFlight) throw new HubError('navigation.changed');
     const generation = slot.generation, grantId = grant.id, identity = record.identity;
-    const current = () => this.records.get(tabId) === record && record.identity === identity && slot.generation === generation && this.access.now() < record.observation.validUntil && grant.enabled && grant.id === grantId;
+    const attended = () => !attentionId || record.observation.state === 'attention' && record.observation.attention?.id === attentionId && !record.observation.attention.acknowledged;
+    const current = () => this.records.get(tabId) === record && record.identity === identity && slot.generation === generation && this.access.now() < record.observation.validUntil && grant.enabled && grant.id === grantId && attended();
     if (!current()) throw new HubError('navigation.expired');
     // Focus must verify a newly sampled current top frame, even if Chrome's navigation event is still queued.
     // Respect the same per-tab rate bound; an already in-flight job cannot substitute for this fresh proof.
     const wait = Math.max(0, 1_000 - (this.access.now() - slot.lastStarted));
+    // An armed routine timer shares this deadline and would take the slot first; focus's own sample serves its request.
+    clearTimeout(slot.timer); slot.timer = undefined;
     if (wait) await new Promise(resolve => setTimeout(resolve, wait));
-    if (!current() || slot.inFlight) throw new HubError('navigation.changed');
+    if (!current() || slot.inFlight) {
+      if (slot.pending && slot.desiredProvider) this.schedule(tabId, slot.desiredProvider);
+      throw new HubError('navigation.changed');
+    }
     clearTimeout(slot.timer); slot.timer = undefined;
     if (!await this.sample(tabId, provider, slot) || !current()) throw new HubError('navigation.changed');
     await this.access.focus(provider, tabId, current);
@@ -213,6 +221,39 @@ export class WebActivity {
     const record = [...this.records.values()].find(item => item.observation.id === id);
     if (!record || record.observation.validUntil <= this.access.now() || record.observation.attention?.id !== attentionId) throw new HubError('navigation.expired');
     record.observation.attention.acknowledged = true; this.changed();
+  }
+  /** Live, unacknowledged attention in raise order; ties use the lower tab ID. Returns the stored observations. */
+  pendingAttention() {
+    const now = this.access.now();
+    return [...this.records.values()].map(record => record.observation)
+      .filter(observation => observation.validUntil > now && observation.state === 'attention' && observation.attention && !observation.attention.acknowledged)
+      .sort((a, b) => a.attention!.raisedAt - b.attention!.raisedAt || a.tabId - b.tabId);
+  }
+  // Repeated key presses join the running attempt instead of racing it onto a later candidate.
+  focusNextAttention(): Promise<'focused' | 'none' | 'failed'> {
+    return this.focusing ??= this.focusNext().finally(() => { this.focusing = undefined; });
+  }
+  private async focusNext(): Promise<'focused' | 'none' | 'failed'> {
+    this.expire();
+    const candidates = this.pendingAttention().map(observation => [observation.id, observation.attention!.id] as const);
+    let attempted = false;
+    // Bounded by the initial candidates. Each attempt is the ordinary focus(): fresh sample, identity and grant checks,
+    // plus the same attention still unacknowledged in that sample.
+    for (const [id, attentionId] of candidates) {
+      if (!this.pendingAttention().some(observation => observation.id === id && observation.attention!.id === attentionId)) continue;
+      attempted = true;
+      try { await this.focus(id, attentionId); return 'focused'; } catch { /* The next candidate may still be valid. */ }
+    }
+    return attempted ? 'failed' : 'none';
+  }
+  /** Local seen only, as acknowledge(). Optional IDs limit it to the attention identities the user was shown. */
+  acknowledgeAll(attentionIds?: readonly string[]) {
+    this.expire();
+    const shown = attentionIds && new Set(attentionIds);
+    let count = 0;
+    for (const observation of this.pendingAttention()) if (!shown || shown.has(observation.attention!.id)) { observation.attention!.acknowledged = true; count++; }
+    this.changed();
+    return count;
   }
   expire() {
     let changed = false;

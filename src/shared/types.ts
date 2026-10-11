@@ -1,7 +1,7 @@
 import type { BrowserActivity, ControlRequest, ControlResponse } from './launch';
 import type { AgentDetection } from './discovery';
 import type { WebDiscovery, WebPreparation, WebPreparationInput, WebPreparationPatch, WebProvider } from './web';
-import type { WebActivitySnapshot } from './activity';
+import type { ActivityShortcuts, WebActivitySnapshot } from './activity';
 export type SourceId = 'claude-code' | 'codex';
 export type Execution = 'running' | 'waiting_input' | 'paused' | 'completed' | 'failed' | 'cancelled';
 export type Connection = 'online' | 'stale' | 'disconnected';
@@ -49,6 +49,8 @@ export interface HubClient {
   getWebActivity?(): Promise<WebActivitySnapshot>;
   focusWebActivity?(id: string): Promise<void>;
   acknowledgeWebActivity?(id: string, attentionId: string): Promise<void>;
+  acknowledgeAllWebActivity?(attentionIds?: string[]): Promise<number>;
+  getShortcuts?(): Promise<ActivityShortcuts>;
   getWebDiscovery?(): Promise<WebDiscovery>;
   requestWebDiscoveryPermission?(provider?: WebProvider): Promise<boolean>;
   removeWebDiscoveryPermission?(provider?: WebProvider): Promise<boolean>;

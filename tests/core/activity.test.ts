@@ -12,7 +12,7 @@ describe('conservative activity reducer', () => {
     reduceActivity(record, 'idle_ready', 1199, 40, 16199); expect(record.observation.state).toBe('working');
     reduceActivity(record, 'idle_ready', 1200, 50, 16200); expect(record.observation.state).toBe('attention');
     const id = record.observation.attention!.id; record.observation.attention!.acknowledged = true;
-    reduceActivity(record, 'idle_ready', 9000, 60, 24000); expect(record.observation.attention).toEqual({ id, reason: 'response_ready', acknowledged: true });
+    reduceActivity(record, 'idle_ready', 9000, 60, 24000); expect(record.observation.attention).toEqual({ id, reason: 'response_ready', acknowledged: true, raisedAt: 1200 });
     reduceActivity(record, 'working', 10000, 70, 25000); expect(record.observation.attention).toBeUndefined();
   });
   it.each(['unknown', 'working'] as const)('%s breaks idle debounce; unknown also destroys witness', evidence => {
@@ -28,6 +28,19 @@ describe('conservative activity reducer', () => {
     expect(record.observation.attention).toMatchObject({ id, acknowledged: true });
     reduceActivity(record, 'error_visible', 2000, 0, 17000); expect(record.observation.attention).toMatchObject({ reason: 'error_visible', acknowledged: false });
     makeUnknown(record, 'expired', 17000); expect(record.observation.attention).toBeUndefined(); expect(record.worked).toBe(false);
+  });
+  it('stamps raisedAt once per attention identity on the monotonic clock and keeps it while that attention persists', () => {
+    const record = newActivityRecord('claude-web', 1, 2, 'session', 0, 0);
+    reduceActivity(record, 'input_required', 500, 99_000, 15500); const first = structuredClone(record.observation.attention!);
+    expect(first).toMatchObject({ reason: 'input_required', acknowledged: false, raisedAt: 500 });
+    record.observation.attention!.acknowledged = true; reduceActivity(record, 'input_required', 1500, 1, 16500);
+    expect(record.observation.attention).toEqual({ ...first, acknowledged: true });
+    reduceActivity(record, 'error_visible', 2500, 2, 17500);
+    expect(record.observation.attention).toMatchObject({ reason: 'error_visible', acknowledged: false, raisedAt: 2500 }); expect(record.observation.attention!.id).not.toBe(first.id);
+    reduceActivity(record, 'working', 3000, 3, 18000); expect(record.observation.attention).toBeUndefined();
+    reduceActivity(record, 'idle_ready', 3100, 4, 18100); reduceActivity(record, 'idle_ready', 4100, 5, 19100);
+    expect(record.observation.attention).toMatchObject({ reason: 'response_ready', raisedAt: 4100 });
+    reduceActivity(record, 'idle_ready', 9000, 6, 24000); expect(record.observation.attention!.raisedAt).toBe(4100);
   });
 });
 
@@ -170,5 +183,123 @@ describe('leased worker observations', () => {
     vi.mocked(access.tab).mockResolvedValue(currentTab()); activity.updateTab(1, { url: currentTab().url, status: 'complete' }, currentTab());
     slow.resolve([]); await tick(); await tick(1000);
     expect(access.sample).toHaveBeenCalledTimes(2); expect(row()).toMatchObject({ provider: 'chatgpt-web', state: 'working' });
+  });
+});
+
+describe('next attention and mark all as seen', () => {
+  const evidenceFor = new Map<number, ActivityEvidence>(), documents = new Map<number, string>(), activations = new Map<number, string>();
+  const tabOf = (id: number) => ({ id, windowId: 2, url: `https://chatgpt.com/c/PRIVATE_URL_CANARY_${id}`, status: 'complete' });
+  const byTab = (tabId: number) => activity.snapshot().observations.find(observation => observation.tabId === tabId)!;
+  const focused = () => vi.mocked(access.focus).mock.calls.map(call => call[1]);
+  // Tab events only request a sample; evidence is still pulled through the leased sample path.
+  const raise = async (tabId: number, value: ActivityEvidence) => { evidenceFor.set(tabId, value); activity.updateTab(tabId, {}, tabOf(tabId)); await tick(1000); };
+  beforeEach(() => {
+    for (const id of [1, 2, 3]) { evidenceFor.set(id, 'working'); documents.set(id, `document-${id}`); activations.set(id, crypto.randomUUID()); }
+    vi.mocked(access.tabs).mockImplementation(async () => [1, 2, 3].map(tabOf));
+    vi.mocked(access.tab).mockImplementation(async id => tabOf(id));
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: evidenceFor.get(tabId)! } }]);
+  });
+  it('focuses the earliest raised unacknowledged attention, ties on the lower tab ID, through the ordinary revalidated focus', async () => {
+    // Reverse discovery order: records are kept higher tab first, so only the tab ID tie-break can choose tab 1 over tab 2.
+    vi.mocked(access.tabs).mockImplementation(async () => [3, 2, 1].map(tabOf));
+    activity.start(); await tick(); expect(activity.snapshot().observations.map(observation => observation.tabId)).toEqual([3, 2, 1]);
+    await raise(3, 'input_required');
+    evidenceFor.set(2, 'error_visible'); evidenceFor.set(1, 'error_visible'); activity.updateTab(2, {}, tabOf(2)); activity.updateTab(1, {}, tabOf(1)); await tick(1000);
+    expect(byTab(1).attention!.raisedAt).toBe(byTab(2).attention!.raisedAt); expect(byTab(3).attention!.raisedAt).toBeLessThan(byTab(1).attention!.raisedAt);
+    const samples = vi.mocked(access.sample).mock.calls.length, raised = byTab(3).attention!;
+    const first = activity.focusNextAttention(); await tick(1000); expect(await first).toBe('focused');
+    expect(focused()).toEqual([3]); expect(vi.mocked(access.sample).mock.calls.length).toBe(samples + 1);
+    expect(byTab(3).attention).toEqual(raised);
+    activity.acknowledge(byTab(3).id, raised.id);
+    const second = activity.focusNextAttention(); await tick(1000); expect(await second).toBe('focused');
+    expect(focused()).toEqual([3, 1]); expect(byTab(1).attention!.acknowledged).toBe(false);
+  });
+  it('skips expired attention and never focuses it', async () => {
+    activity.start(); await tick();
+    await raise(1, 'input_required'); await tick(10_000); await raise(2, 'error_visible'); await tick(4_500);
+    expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' }); expect(byTab(2).state).toBe('attention');
+    const attempts = vi.spyOn(activity, 'focus');
+    const next = activity.focusNextAttention(); await tick(1000); expect(await next).toBe('focused');
+    expect(attempts).toHaveBeenCalledExactlyOnceWith(byTab(2).id, byTab(2).attention!.id); expect(focused()).toEqual([2]);
+  });
+  it('falls back to the next candidate when revalidation or activation fails, bounded by the initial candidates', async () => {
+    activity.start(); await tick(); await raise(2, 'input_required'); await raise(1, 'error_visible');
+    documents.set(2, 'document-replaced-before-event');
+    const next = activity.focusNextAttention(); for (let step = 0; step < 3; step++) await tick(1000);
+    expect(await next).toBe('focused'); expect(focused()).toEqual([1]);
+    vi.mocked(access.focus).mockRejectedValue(new Error('closed'));
+    const failing = activity.focusNextAttention(); for (let step = 0; step < 4; step++) await tick(1000);
+    expect(await failing).toBe('failed');
+    expect(focused().slice(1).sort()).toEqual([1, 2]); expect(access.focus).toHaveBeenCalledTimes(3);
+  });
+  it('reports no candidate without sampling or focusing when nothing needs attention', async () => {
+    activity.start(); await tick();
+    const samples = vi.mocked(access.sample).mock.calls.length;
+    expect(await activity.focusNextAttention()).toBe('none');
+    await raise(1, 'input_required'); activity.acknowledge(byTab(1).id, byTab(1).attention!.id);
+    expect(await activity.focusNextAttention()).toBe('none');
+    expect(access.focus).not.toHaveBeenCalled(); expect(vi.mocked(access.sample).mock.calls.length).toBe(samples + 1);
+  });
+  it('keeps the earliest candidate when a routine sample timer is already armed for its tab', async () => {
+    let slow = false;
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => {
+      if (slow) await new Promise(resolve => setTimeout(resolve, 40));
+      return [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: evidenceFor.get(tabId)! } }];
+    });
+    activity.start(); await tick(); await raise(2, 'input_required'); await raise(1, 'input_required');
+    // A routine sample of tab 2 just ran; a hint 300 ms later arms the per-tab timer for the same deadline focus waits for.
+    activity.updateTab(2, {}, tabOf(2)); await tick(); await tick(300); slow = true; activity.updateTab(2, {}, tabOf(2));
+    const next = activity.focusNextAttention(); await tick(1000); expect(await next).toBe('focused'); expect(focused()).toEqual([2]);
+    activity.acknowledge(byTab(1).id, byTab(1).attention!.id); await tick(300); activity.updateTab(2, {}, tabOf(2));
+    const sole = activity.focusNextAttention(); await tick(1000); expect(await sole).toBe('focused'); expect(focused()).toEqual([2, 2]);
+    // The routine request the timer carried is served by focus's own fresh sample, not dropped.
+    activity.updateTab(2, {}, tabOf(2)); const samples = vi.mocked(access.sample).mock.calls.length; await tick(1000);
+    expect(vi.mocked(access.sample).mock.calls.length).toBe(samples + 1);
+  });
+  it('a focus attempt that fails after its rate wait still serves the routine sample it displaced', async () => {
+    activity.start(); await tick(); await raise(1, 'input_required');
+    activity.updateTab(1, {}, tabOf(1)); await tick(); await tick(300); activity.updateTab(1, {}, tabOf(1));
+    const samples = vi.mocked(access.sample).mock.calls.length;
+    const next = activity.focusNextAttention(); activity.acknowledge(byTab(1).id, byTab(1).attention!.id);
+    await tick(1000); expect(await next).toBe('failed'); expect(access.focus).not.toHaveBeenCalled();
+    expect(vi.mocked(access.sample).mock.calls.length).toBe(samples + 1);
+  });
+  it('moves on when the fresh focus sample shows the candidate no longer needs review', async () => {
+    activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    evidenceFor.set(1, 'working');
+    const next = activity.focusNextAttention(); for (let step = 0; step < 2; step++) await tick(1000);
+    expect(await next).toBe('focused'); expect(focused()).toEqual([2]);
+    expect(byTab(1)).toMatchObject({ state: 'working' }); expect(byTab(1).attention).toBeUndefined();
+    // The panel's Open session keeps its ordinary meaning: it focuses a current session whatever its state.
+    const open = activity.focus(byTab(1).id); await tick(1000); await open; expect(focused()).toEqual([2, 1]);
+  });
+  it('joins repeated presses to the running attempt instead of racing onto a later candidate', async () => {
+    activity.start(); await tick(); await raise(2, 'input_required'); await raise(1, 'input_required');
+    const first = activity.focusNextAttention(), second = activity.focusNextAttention();
+    expect(second).toBe(first); await tick(1000); expect(await first).toBe('focused'); expect(focused()).toEqual([2]);
+  });
+  it('marks every current attention as seen locally, returns the count and clears the badge', async () => {
+    activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'error_visible');
+    expect(access.badge).toHaveBeenLastCalledWith('2');
+    const before = activity.snapshot().observations; vi.mocked(access.notify).mockClear();
+    expect(activity.acknowledgeAll()).toBe(2); await tick();
+    expect(access.badge).toHaveBeenLastCalledWith(''); expect(access.notify).toHaveBeenCalled();
+    const after = activity.snapshot().observations;
+    expect(after.map(observation => observation.attention && { ...observation.attention, acknowledged: false })).toEqual(before.map(observation => observation.attention));
+    expect(after.filter(observation => observation.attention).every(observation => observation.attention!.acknowledged)).toBe(true);
+    expect(byTab(3)).toMatchObject({ state: 'working' }); expect(access.focus).not.toHaveBeenCalled();
+    expect(activity.acknowledgeAll()).toBe(0);
+    await raise(3, 'input_required'); expect(byTab(3).attention!.acknowledged).toBe(false); expect(access.badge).toHaveBeenLastCalledWith('1');
+    expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|documentId|activationId/);
+  });
+  it('limits mark all to the attention identities shown and ignores replaced, unknown or expired ones', async () => {
+    activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    const shown = [byTab(1).attention!.id, byTab(2).attention!.id];
+    await raise(2, 'error_visible');
+    expect(activity.acknowledgeAll([...shown, crypto.randomUUID()])).toBe(1); await tick();
+    expect(byTab(1).attention!.acknowledged).toBe(true); expect(byTab(2).attention).toMatchObject({ reason: 'error_visible', acknowledged: false });
+    expect(access.badge).toHaveBeenLastCalledWith('1');
+    now += ACTIVITY_TTL; expect(activity.acknowledgeAll()).toBe(0);
+    expect(activity.snapshot().observations.every(observation => observation.state === 'unknown' && !observation.attention)).toBe(true);
   });
 });

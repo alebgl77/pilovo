@@ -17,6 +17,8 @@ Keep track of your ChatGPT and Claude tabs in one quiet workspace. See observed 
 
 The panel distinguishes working, response ready, recognized requests for attention, and unknown or expired evidence. Response ready requires witnessed work followed by a recognized ready signal and debounce. A tab merely being open, a disappearing button or an old completion announcement is insufficient.
 
+**Keyboard shortcuts** (unreleased; build from source until the next release). Press `Alt+Shift+J` (`Option+Shift+J` on macOS) to go to the next item to review: the earliest unacknowledged attention, revalidated like **Open session** and skipped for the next one if the fresh check shows it no longer needs review. When nothing needs review, it opens the side panel. **Mark all items to review as seen** has no default key; assign it, or change `Alt+Shift+J`, at `chrome://extensions/shortcuts`. When two or more items need review, the panel also offers **Mark all as seen**. Like a single acknowledgment, it is local and only means you noticed them.
+
 The toolbar badge reflects the last observed, unacknowledged attention. Evidence has a 15-second logical lifetime. Background tabs may be throttled; Chrome may suspend its service worker. The panel checks freshness, but badge cleanup uses a best-effort watchdog and is not a strict real-time notification guarantee. There are no OS notifications.
 
 ![Pilovo activity panel with synthetic examples](docs/media/screenshots/Pilovo_activity_desktop_synthetic.png)

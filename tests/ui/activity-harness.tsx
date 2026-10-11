@@ -3,16 +3,17 @@ import { createRoot } from 'react-dom/client';
 import { App } from '../../src/ui/App';
 import { client } from '../../src/platform/client';
 import { DEFAULT_SETTINGS } from '../../src/shared/defaults';
-import { monotonicEpoch, type WebActivityObservation, type WebActivitySnapshot } from '../../src/shared/activity';
+import { monotonicEpoch, type ActivityShortcuts, type WebActivityObservation, type WebActivitySnapshot } from '../../src/shared/activity';
 import { emptyWebDiscovery, type WebProvider } from '../../src/shared/web';
 import type { HubClient, Snapshot } from '../../src/shared/types';
 import '../../src/ui/styles.css';
 
 const listeners = new Set<() => void>(), grants = new Set<WebProvider>();
-const calls = { focus: [] as string[], ack: [] as { id: string; attentionId: string }[], permission: [] as { provider?: WebProvider; revoke: boolean }[], opens: [] as WebProvider[], reads: 0 };
-let records: WebActivityObservation[] = [], failure = false, focusFailure = false, ackFailure = false, deny = false, hold = new URL(location.href).searchParams.has('loading'), holdAck = false;
+const calls = { focus: [] as string[], ack: [] as { id: string; attentionId: string }[], ackAll: [] as (string[] | undefined)[], permission: [] as { provider?: WebProvider; revoke: boolean }[], opens: [] as WebProvider[], reads: 0 };
+let records: WebActivityObservation[] = [], failure = false, shortcutFailure = false, focusFailure = false, ackFailure = false, ackAllFailure = false, deny = false, hold = new URL(location.href).searchParams.has('loading'), holdAck = false, holdAckAll = false;
+let shortcuts: ActivityShortcuts = { 'focus-next-attention': 'Alt+Shift+J' };
 const pending: { resolve: (value: WebActivitySnapshot) => void; value: WebActivitySnapshot }[] = [];
-let pendingAck: (() => void) | undefined;
+let pendingAck: (() => void) | undefined, pendingAckAll: (() => void) | undefined;
 const snapshot: Snapshot = { mode: 'extension', bridgeStatus: 'disabled', connectors: [], settings: { ...DEFAULT_SETTINGS, language: 'fr', theme: 'light' }, missions: [], tasks: [], webPreparations: [], diagnostics: { acceptedEvents: 0, duplicateEvents: 0, rejectedEvents: 0 } };
 const signal = () => listeners.forEach(listener => listener());
 const sample = (): WebActivitySnapshot => ({ availability: 'available', observations: structuredClone(records), observedAt: Date.now() });
@@ -22,7 +23,7 @@ const seed = (ttl = 60000) => {
   records = [
     { ...common, id: 'idle', provider: 'claude-web', tabId: 9, state: 'idle' },
     { ...common, id: 'working', provider: 'chatgpt-web', tabId: 11, state: 'working' },
-    { ...common, id: 'attention', provider: 'chatgpt-web', tabId: 12, state: 'attention', attention: { id: 'event-a', reason: 'response_ready', acknowledged: false } },
+    { ...common, id: 'attention', provider: 'chatgpt-web', tabId: 12, state: 'attention', attention: { id: 'event-a', reason: 'response_ready', acknowledged: false, raisedAt: monotonicEpoch() - 2000 } },
     { ...common, id: 'unsupported', provider: 'claude-web', tabId: 14, state: 'unknown', unknownReason: 'no_evidence' },
   ];
   signal();
@@ -44,6 +45,16 @@ const api: HubClient = {
     if (ackFailure || !record?.attention || record.attention.id !== attentionId) throw new Error('new event');
     record.attention.acknowledged = true; signal();
   },
+  acknowledgeAllWebActivity: async attentionIds => {
+    calls.ackAll.push(attentionIds && [...attentionIds]);
+    if (holdAckAll) await new Promise<void>(resolve => { pendingAckAll = resolve; });
+    if (ackAllFailure) throw new Error('storage');
+    // Mirrors the worker: only live, unacknowledged attention whose identity the panel displayed.
+    const current = records.filter(record => record.validUntil > monotonicEpoch() && record.attention && !record.attention.acknowledged && (!attentionIds || attentionIds.includes(record.attention.id)));
+    for (const record of current) record.attention!.acknowledged = true;
+    signal(); return current.length;
+  },
+  getShortcuts: async () => { if (shortcutFailure) throw new Error('commands unavailable'); return structuredClone(shortcuts); },
 };
 if (new URL(location.href).searchParams.has('legacy')) { delete api.getWebActivity; delete api.getWebDiscovery; delete api.requestWebDiscoveryPermission; delete api.removeWebDiscoveryPermission; }
 const root = createRoot(document.getElementById('root')!);
@@ -54,7 +65,13 @@ Object.assign(window, { __activity: {
   hold: (value: boolean) => { hold = value; }, pending: () => pending.length,
   resolve: (index: number) => pending[index].resolve(pending[index].value),
   holdAck: (value: boolean) => { holdAck = value; }, resolveAck: () => pendingAck?.(),
-  nextAttention: () => { const record = records.find(record => record.id === 'attention'); if (record) { record.attention = { id: 'event-b', reason: 'input_required', acknowledged: false }; signal(); } },
+  nextAttention: () => { const record = records.find(record => record.id === 'attention'); if (record) { record.attention = { id: 'event-b', reason: 'input_required', acknowledged: false, raisedAt: monotonicEpoch() }; signal(); } },
+  addAttention: () => { const base = records.find(record => record.id === 'attention'); if (base) { records.push({ ...structuredClone(base), id: 'attention-2', provider: 'claude-web', tabId: 15, attention: { id: 'event-c', reason: 'input_required', acknowledged: false, raisedAt: monotonicEpoch() - 1000 } }); signal(); } },
+  failAckAll: (value: boolean) => { ackAllFailure = value; },
+  holdAckAll: (value: boolean) => { holdAckAll = value; }, resolveAckAll: () => pendingAckAll?.(),
+  shortcut: (value: string | null) => { shortcuts = value === null ? {} : { 'focus-next-attention': value }; signal(); },
+  noShortcuts: () => { delete api.getShortcuts; signal(); },
+  failShortcuts: (value: boolean) => { shortcutFailure = value; signal(); },
   empty: () => { records = []; signal(); },
   unmount: () => root.unmount(), settings: (patch: Parameters<HubClient['updateSettings']>[0]) => api.updateSettings(patch),
 } });

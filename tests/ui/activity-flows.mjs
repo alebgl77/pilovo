@@ -80,6 +80,63 @@ try {
   expect((await page.evaluate(() => window.__activity.calls().ack)).at(-1).attentionId).toBe('event-a');
   pass('duplicate action lock and old acknowledgement cannot acknowledge a newer attention event');
 
+  await page.evaluate(() => { window.__activity.seed(); window.__activity.addAttention(); });
+  await expect(page.locator('.activity-summary dd').first()).toHaveText('2');
+  await expect(page.locator('.activity-row').nth(0)).toHaveAttribute('data-activity-id', 'attention');
+  await expect(page.locator('.activity-row').nth(1)).toHaveAttribute('data-activity-id', 'attention-2');
+  const markAll = page.getByRole('button', { name: 'Tout marquer comme vu', exact: true });
+  await expect(markAll).toBeEnabled();
+  await expect(page.locator('.activity-shortcut')).toHaveText('Prochain élément à vérifier : Alt+Maj+J');
+  await audit('activity-mark-all-French');
+  await page.evaluate(() => window.__activity.failAckAll(true));
+  await markAll.click();
+  await expect(page.locator('.activity-bulk-error')).toHaveAttribute('role', 'alert');
+  await expect(page.locator('.activity-bulk-error')).toContainText('n’ont pas pu être marqués comme vus');
+  await expect(row('attention').locator('.activity-state')).toHaveText('À vérifier'); await expect(row('attention-2').locator('.activity-state')).toHaveText('À vérifier');
+  expect((await page.evaluate(() => window.__activity.calls().ackAll)).at(-1)).toEqual(['event-a', 'event-c']);
+  await page.evaluate(() => window.__activity.failAckAll(false));
+  await page.getByRole('button', { name: 'Actualiser l’activité' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(markAll).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(row('attention').locator('.activity-state')).toHaveText('Vu'); await expect(row('attention-2').locator('.activity-state')).toHaveText('Vu');
+  await expect(row('attention')).toContainText('Réponse disponible');
+  await expect(page.locator('.activity-summary dd').first()).toHaveText('0');
+  await expect(markAll).toHaveCount(0); await expect(page.locator('.activity-bulk-error')).toHaveCount(0);
+  await expect(page.locator('.activity-row').first().getByRole('button', { name: 'Ouvrir la session' })).toBeFocused();
+  expect(await page.evaluate(() => window.__activity.calls().focus)).toEqual(['attention']);
+  pass('mark all as seen: shown for two items to review, keyboard operable, failure announced and confirmed only by a refreshed snapshot');
+
+  await page.evaluate(() => { window.__activity.seed(); window.__activity.addAttention(); window.__activity.holdAckAll(true); });
+  await markAll.click();
+  await expect(page.locator('.activity-bulk .button')).toHaveText('Enregistrement…');
+  await expect(page.locator('.activity-bulk .button')).toBeDisabled();
+  const beforeAll = await page.evaluate(() => window.__activity.calls().ackAll.length);
+  await page.locator('.activity-bulk .button').evaluate(button => button.click());
+  expect(await page.evaluate(() => window.__activity.calls().ackAll.length)).toBe(beforeAll);
+  await page.evaluate(() => window.__activity.nextAttention());
+  await expect(row('attention')).toContainText('Une intervention est demandée');
+  await page.evaluate(() => { window.__activity.holdAckAll(false); window.__activity.resolveAckAll(); });
+  await expect(row('attention-2').locator('.activity-state')).toHaveText('Vu');
+  await expect(row('attention').locator('.activity-state')).toHaveText('À vérifier');
+  await expect(page.locator('.activity-summary dd').first()).toHaveText('1');
+  await expect(markAll).toHaveCount(0); await expect(page.locator('.activity-bulk-error')).toHaveCount(0);
+  pass('mark all is locked while pending and cannot acknowledge an attention raised after it was shown');
+
+  await page.evaluate(() => window.__activity.shortcut(null));
+  await expect(page.locator('.activity-shortcut')).toHaveCount(0);
+  await page.evaluate(() => window.__activity.shortcut('Ctrl+Shift+Y'));
+  await expect(page.locator('.activity-shortcut')).toHaveText('Prochain élément à vérifier : Ctrl+Maj+Y');
+  await expect(page.locator('.activity-shortcut kbd')).toHaveText('Ctrl+Maj+Y');
+  await page.evaluate(() => window.__activity.shortcut('Alt+Shift+J'));
+  await expect(page.locator('.activity-shortcut')).toHaveText('Prochain élément à vérifier : Alt+Maj+J');
+  // A failed read must not leave the previously read key on screen.
+  await page.evaluate(() => window.__activity.failShortcuts(true));
+  await expect(page.locator('.activity-shortcut')).toHaveCount(0);
+  await page.evaluate(() => window.__activity.failShortcuts(false));
+  await expect(page.locator('.activity-shortcut')).toHaveText('Prochain élément à vérifier : Alt+Maj+J');
+  pass('shortcut hint shows the configured key and hides when it is unassigned or cannot be read');
+
   await page.evaluate(() => { window.__activity.hold(true); window.__activity.seed(); });
   const first = await page.evaluate(() => window.__activity.pending() - 1);
   await page.evaluate(() => window.__activity.empty());
@@ -128,12 +185,20 @@ try {
   await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
   await expect(row('attention')).toContainText('Response available');
   await audit('activity-360-dark-English'); await overflow(); await screenshot('activity_360_dark');
+  await page.evaluate(() => window.__activity.addAttention());
+  await expect(page.getByRole('button', { name: 'Mark all as seen', exact: true })).toBeVisible();
+  await expect(page.locator('.activity-shortcut')).toHaveText('Next item to review: Alt+Shift+J');
+  await audit('activity-360-dark-English-mark-all'); await overflow();
   await page.evaluate(() => window.__activity.settings({ language: 'fr', theme: 'light' }));
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light'); await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
+  await expect(page.getByRole('button', { name: 'Tout marquer comme vu', exact: true })).toBeVisible();
   await audit('activity-360-light-French'); await overflow();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   expect(await page.locator('.button').first().evaluate(element => getComputedStyle(element).transitionDuration)).toBe('0s');
-  pass('French/English, 360px light/dark, reduced motion, no overflow and zero axe violations');
+  await page.evaluate(() => window.__activity.noShortcuts());
+  await expect(page.locator('.activity-shortcut')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Tout marquer comme vu', exact: true })).toBeVisible();
+  pass('French/English, 360px light/dark, mark all and shortcut hint, reduced motion, no overflow and zero axe violations; hint hidden without shortcut access');
 
   await page.evaluate(() => { window.__activity.hold(true); window.__activity.signal(); });
   const unmountRequest = await page.evaluate(() => window.__activity.pending() - 1);
@@ -147,6 +212,22 @@ try {
   await expect(page.getByRole('button', { name: 'Ouvrir Claude', exact: true })).toBeEnabled();
   await audit('activity-unavailable');
   pass('subscriptions dispose; late completions are ignored; optional-method preview is truthfully unavailable');
+
+  // DESIGN.md: 44 px coarse-pointer targets, including the compact activity actions.
+  const touch = await browser.newContext({ viewport: { width: 1200, height: 900 }, hasTouch: true, colorScheme: 'light' });
+  const touchPage = await touch.newPage();
+  touchPage.on('pageerror', error => report.errors.push(error.message));
+  await touchPage.goto(`${base}/tests/ui/activity-harness.html`);
+  await touchPage.evaluate(() => { window.__activity.seed(); window.__activity.addAttention(); });
+  for (const width of [1200, 360]) {
+    await touchPage.setViewportSize({ width, height: 900 });
+    await expect(touchPage.getByRole('button', { name: 'Tout marquer comme vu', exact: true })).toBeVisible();
+    expect(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+    const heights = await touchPage.locator('.activity-bulk .button, .activity-row-actions .button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().height));
+    expect(heights.length).toBeGreaterThan(2); expect(Math.min(...heights)).toBeGreaterThanOrEqual(44);
+  }
+  await touch.close();
+  pass('mark all and row actions keep 44 px coarse-pointer targets at 1200px and 360px');
   expect(report.errors).toEqual([]);
 } catch (error) { report.failure = String(error); await page.screenshot({ path: path.join(output, 'Pilovo-activity-failure-synthetic.png'), fullPage: true }); throw error; }
 finally { await writeFile(path.join(output, 'Pilovo-activity-report.json'), JSON.stringify(report, null, 2)); await browser.close(); }

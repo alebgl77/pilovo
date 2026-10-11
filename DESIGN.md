@@ -1,6 +1,6 @@
 # Design system
 
-Pilovo 0.4.0 Preview opens on observed web activity. A row shows provider, non-sensitive local identity, evidence state and freshness. Focus and seen acknowledgment are separate actions. Unknown remains explicit when evidence expires or is inaccessible. Manual preparations and historical receipts retain their own provenance in separate views.
+Pilovo 0.4.0 Preview opens on observed web activity. A row shows provider, non-sensitive local identity, evidence state and freshness. Focus and seen acknowledgment are separate actions. Mark all as seen appears only when two or more rows need attention, uses the same lock and inline error as rows and confirms through a refreshed snapshot. A discreet hint shows the configured next-attention shortcut and is hidden when none is assigned. Unknown remains explicit when evidence expires or is inaccessible. Manual preparations and historical receipts retain their own provenance in separate views.
 
 The physical scene: a professional reviews an agent's work next to a document in a daylight office, moving between a narrow Chrome side panel and a full browser tab. Light mode uses a white canvas to match that working surface; dark and system modes support evening review without changing semantics.
 

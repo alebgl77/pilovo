@@ -4,6 +4,7 @@ import { openDB } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiResult } from '../../src/shared/types';
 import { WEB_ORIGINS } from '../../src/shared/web';
+import { rpcSchema } from '../../src/shared/rpc';
 
 function signal() { const listeners: ((...args: any[]) => any)[] = []; return { addListener: vi.fn((listener: (...args: any[]) => any) => listeners.push(listener)), removeListener: vi.fn(), emit: (...args: any[]) => listeners.forEach(listener => listener(...args)), listeners }; }
 let api: any;
@@ -17,7 +18,7 @@ beforeEach(async () => {
     permissions: { contains: vi.fn().mockResolvedValue(true), request: vi.fn(), onRemoved: signal(), onAdded: signal() },
     tabs: { query: vi.fn().mockResolvedValue([{ id: 4, windowId: 1, url: 'https://claude.ai/chat/private', title: 'Private title' }]), get: vi.fn(), create: vi.fn().mockResolvedValue({ id: 5 }), update: vi.fn(), onCreated: signal(), onUpdated: signal(), onRemoved: signal(), onAttached: signal(), onDetached: signal(), onReplaced: signal() },
     scripting: { registerContentScripts: vi.fn().mockResolvedValue(undefined), unregisterContentScripts: vi.fn().mockResolvedValue(undefined), executeScript: vi.fn().mockResolvedValue([]) },
-    windows: { update: vi.fn() }, alarms: { create: vi.fn().mockResolvedValue(undefined), onAlarm: signal() }, sidePanel: { setPanelBehavior: vi.fn().mockResolvedValue(undefined), open: vi.fn().mockResolvedValue(undefined) }, action: { onClicked: signal(), setBadgeText: vi.fn().mockResolvedValue(undefined), setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined) },
+    windows: { update: vi.fn(), getLastFocused: vi.fn().mockResolvedValue({ id: 3 }), onFocusChanged: signal() }, commands: { onCommand: signal(), getAll: vi.fn() }, alarms: { create: vi.fn().mockResolvedValue(undefined), onAlarm: signal() }, sidePanel: { setPanelBehavior: vi.fn().mockResolvedValue(undefined), open: vi.fn().mockResolvedValue(undefined) }, action: { onClicked: signal(), setBadgeText: vi.fn().mockResolvedValue(undefined), setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined) },
   };
   vi.stubGlobal('chrome', api);
   const { HubRepository } = await import('../../src/domain/repository'); const seed = new HubRepository(); await seed.snapshot(); await seed.close();
@@ -76,6 +77,46 @@ describe('standalone service worker trust boundary', () => {
   it('coalesces tab and permission changes into a data-free notification', async () => {
     api.runtime.sendMessage.mockClear(); api.tabs.onUpdated.emit(4, {}, { title: 'Do not expose', url: 'https://unrelated.test' }); api.tabs.onCreated.emit({}); api.permissions.onAdded.emit({ origins: WEB_ORIGINS });
     await vi.advanceTimersByTimeAsync(250); expect(api.runtime.sendMessage).toHaveBeenCalledOnce(); expect(api.runtime.sendMessage).toHaveBeenCalledWith({ channel: 'hub.changed' });
+  });
+  it('accepts mark all only as a strict, bounded RPC and notifies after it', async () => {
+    for (const invalid of [{ method: 'acknowledgeAllWebActivity', all: true }, { method: 'acknowledgeAllWebActivity', attentionIds: [] }, { method: 'acknowledgeAllWebActivity', attentionIds: ['PRIVATE_CANARY'] }, { method: 'acknowledgeAllWebActivity', attentionIds: crypto.randomUUID() }, { method: 'acknowledgeAllWebActivity', attentionIds: Array.from({ length: 257 }, () => crypto.randomUUID()) }]) {
+      expect(rpcSchema.safeParse(invalid).success).toBe(false); expect(await rpc(invalid)).toMatchObject({ ok: false, error: { code: 'validation.invalid' } });
+    }
+    api.runtime.sendMessage.mockClear();
+    expect(await rpc({ method: 'acknowledgeAllWebActivity' })).toEqual({ ok: true, data: 0 });
+    expect(await rpc({ method: 'acknowledgeAllWebActivity', attentionIds: [crypto.randomUUID()] })).toEqual({ ok: true, data: 0 });
+    await vi.advanceTimersByTimeAsync(250); expect(api.runtime.sendMessage).toHaveBeenCalledWith({ channel: 'hub.changed' });
+  });
+  it('opens the side panel inside the command gesture when nothing needs attention; other commands never open or focus', async () => {
+    const [listener] = api.commands.onCommand.listeners;
+    listener('focus-next-attention', { id: 4, windowId: 7 }); expect(api.sidePanel.open).toHaveBeenCalledExactlyOnceWith({ windowId: 7 });
+    api.sidePanel.open.mockImplementationOnce(() => { throw new Error('gesture required'); });
+    expect(() => listener('focus-next-attention', { id: 4, windowId: 7 })).not.toThrow();
+    // Without a command tab, the last focused browser window, known before the gesture: seeded at startup, then tracked.
+    listener('focus-next-attention'); expect(api.sidePanel.open).toHaveBeenLastCalledWith({ windowId: 3 });
+    api.windows.onFocusChanged.emit(6); api.windows.onFocusChanged.emit(-1);
+    const synchronous = api.sidePanel.open.mock.calls.length;
+    listener('focus-next-attention'); expect(api.sidePanel.open).toHaveBeenCalledTimes(synchronous + 1); expect(api.sidePanel.open).toHaveBeenLastCalledWith({ windowId: 6 });
+    expect(api.windows.getLastFocused).toHaveBeenCalledOnce();
+    const opened = api.sidePanel.open.mock.calls.length;
+    listener('acknowledge-all-attention', { id: 4, windowId: 7 }); listener('unknown-command', { id: 4, windowId: 7 }); await vi.advanceTimersByTimeAsync(250);
+    expect(api.sidePanel.open).toHaveBeenCalledTimes(opened); expect(api.tabs.update).not.toHaveBeenCalled(); expect(api.windows.update).not.toHaveBeenCalled();
+  });
+  it('focuses the next attention and marks all as seen through the registered keyboard commands', async () => {
+    const activationId = crypto.randomUUID(), tab = { id: 4, windowId: 1, url: 'https://claude.ai/chat/private', status: 'complete' };
+    api.tabs.get.mockResolvedValue(tab);
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence: 'input_required' } }] : []);
+    api.tabs.onUpdated.emit(4, { status: 'complete' }, tab); await vi.advanceTimersByTimeAsync(1100);
+    const [observation] = (await rpc({ method: 'getWebActivity' })).data.observations;
+    expect(observation).toMatchObject({ state: 'attention', attention: { reason: 'input_required', acknowledged: false } }); expect(observation.attention.raisedAt).toBeTypeOf('number');
+    expect(api.action.setBadgeText).toHaveBeenLastCalledWith({ text: '1' });
+    const [listener] = api.commands.onCommand.listeners;
+    listener('focus-next-attention', { id: 9, windowId: 5 }); await vi.advanceTimersByTimeAsync(1100);
+    await vi.waitFor(() => expect(api.windows.update).toHaveBeenCalledWith(1, { focused: true }));
+    expect(api.tabs.update).toHaveBeenCalledExactlyOnceWith(4, { active: true }); expect(api.sidePanel.open).not.toHaveBeenCalled();
+    listener('acknowledge-all-attention', { id: 4, windowId: 1 }); await vi.advanceTimersByTimeAsync(0);
+    expect((await rpc({ method: 'getWebActivity' })).data.observations[0].attention).toEqual({ ...observation.attention, acknowledged: true });
+    expect(api.action.setBadgeText).toHaveBeenLastCalledWith({ text: '' });
   });
   it('permits fixed provider opening after denial and refuses removed generic tab capability', async () => {
     api.permissions.contains.mockResolvedValue(false); expect((await rpc({ method: 'openWebProvider', provider: 'chatgpt-web' })).ok).toBe(true); expect(api.tabs.create).toHaveBeenCalledWith({ url: 'https://chatgpt.com/', active: true });

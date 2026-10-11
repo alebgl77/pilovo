@@ -17,6 +17,7 @@ async function dispatch(request: RpcRequest): Promise<unknown> {
     case 'getWebActivity': return activity.snapshot();
     case 'focusWebActivity': return activity.focus(request.id);
     case 'acknowledgeWebActivity': return activity.acknowledge(request.id, request.attentionId);
+    case 'acknowledgeAllWebActivity': return activity.acknowledgeAll(request.attentionIds);
     case 'getWebDiscovery': return web.discovery();
     case 'openWebProvider': return web.open(request.provider, request.tabId);
     case 'createWebPreparation': return repository.createWebPreparation(request.input);
@@ -67,5 +68,22 @@ chrome.tabs.onDetached.addListener(tabId => { invalidateDiscovery(); activity.in
 chrome.tabs.onReplaced.addListener((added, removed) => { invalidateDiscovery(); activity.invalidateTab(removed, true); activity.invalidateTab(added, true); void activity.refresh(); });
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'hub-maintenance') void ready.then(async () => { await repository.cleanup(); notify(); }).catch(() => undefined); });
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'pilovo-activity') { activity.expire(); activity.start(); } });
+// Chrome's command gesture does not survive an await: the nothing-to-review case opens the panel synchronously,
+// in the command's window or else the last focused browser window, tracked ahead of time (window IDs only).
+let lastFocusedWindow: number | undefined;
+chrome.windows.onFocusChanged.addListener(windowId => { if (windowId >= 0) lastFocusedWindow = windowId; });
+void chrome.windows.getLastFocused().then(window => { if (window.id !== undefined && window.id >= 0) lastFocusedWindow ??= window.id; }).catch(() => undefined);
+const openPanel = (windowId?: number) => {
+  const target = windowId !== undefined && windowId >= 0 ? windowId : lastFocusedWindow;
+  if (target === undefined) return;
+  try { void chrome.sidePanel.open({ windowId: target }).catch(() => undefined); } catch { /* Without a gesture or side panel support, the shortcut has no visible effect. */ }
+};
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === 'focus-next-attention') {
+    if (!activity.pendingAttention().length) { openPanel(tab?.windowId); return; }
+    // Best effort after every candidate failed; Chrome may refuse the panel once the gesture has expired.
+    void ready.then(() => activity.focusNextAttention()).then(result => { if (result !== 'focused') openPanel(tab?.windowId); }).catch(() => undefined);
+  } else if (command === 'acknowledge-all-attention') void ready.then(() => activity.acknowledgeAll()).catch(() => undefined);
+});
 chrome.runtime.onInstalled.addListener(() => { void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }); });
 chrome.action.onClicked.addListener(tab => { if (tab.windowId !== undefined) void chrome.sidePanel.open({ windowId: tab.windowId }); });
