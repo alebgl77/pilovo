@@ -13,7 +13,7 @@ Audience hypothesis: people working across ChatGPT and Claude web accounts who w
 - Local isolated observer of recognized DOM controls/status indicators, without collecting prompts, responses or tab titles.
 - Working; ready after witnessed work and debounce; explicitly recognized attention; unknown/stale evidence.
 - Focus, local seen acknowledgment and a last-observed attention toolbar badge.
-- Unreleased in source: a next-attention keyboard shortcut and local mark all as seen, both reusing the same focus/seen rules; elapsed durations for working and attention rows that restart when evidence is lost.
+- Unreleased in source: a next-attention keyboard shortcut and local mark all as seen, both reusing the same focus/seen rules; elapsed durations for working and attention rows that restart when evidence is lost; a toolbar badge colored by the most urgent reason, a working mark and a counts-only tooltip in the app's language.
 - Ephemeral activity metadata; fresh evidence required after restart.
 - Existing manual preparations, per-record prompt retention, notes, missions, search, schema 2 export, deletion and retention kept separate.
 - French/English, themes, free MIT core, no account/API key/companion.

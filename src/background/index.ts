@@ -1,7 +1,7 @@
 import { HubRepository } from '../domain/repository';
 import { errorCode, HubError } from '../shared/errors';
 import { rpcSchema, type RpcRequest } from '../shared/rpc';
-import type { ApiResult } from '../shared/types';
+import type { ApiResult, Settings } from '../shared/types';
 import { chromeWebBrowser, WebBrowser } from '../platform/web';
 import { WebActivity, chromeActivityAccess } from './activity';
 import { WEB_PROVIDERS } from '../shared/web';
@@ -12,6 +12,16 @@ let notifyTimer: ReturnType<typeof setTimeout> | undefined;
 const notify = () => { if (notifyTimer) return; notifyTimer = setTimeout(() => { notifyTimer = undefined; void chrome.runtime.sendMessage({ channel: 'hub.changed' }).catch(() => undefined); }, 200); };
 const activity = new WebActivity(chromeActivityAccess((provider, tabId, current) => web.open(provider, tabId, current), notify));
 const invalidateDiscovery = () => { web.invalidate(); notify(); };
+// The toolbar title follows the app's language setting. A reply applies only if no newer call has applied yet, so an
+// older call resolving late cannot restore its language. updateSettings can reject after its settings write committed
+// (the retention cleanup that follows is a separate write), so a failed call re-reads the persisted language.
+let settingsCalls = 0, settingsApplied = 0;
+const applyLanguage = (call: number, language: unknown) => { if (call > settingsApplied) { settingsApplied = call; activity.setLanguage(language); } };
+const updateSettings = async (patch: Partial<Settings>) => {
+  const call = ++settingsCalls;
+  try { const settings = await repository.updateSettings(patch); applyLanguage(call, settings.language); return settings; }
+  catch (error) { await repository.snapshot().then(snapshot => applyLanguage(call, snapshot.settings.language), () => undefined); throw error; }
+};
 async function dispatch(request: RpcRequest): Promise<unknown> {
   switch (request.method) {
     case 'getWebActivity': return activity.snapshot();
@@ -33,7 +43,7 @@ async function dispatch(request: RpcRequest): Promise<unknown> {
     case 'assignTask': return repository.assignTask(request.key, request.missionId);
     case 'reviewTask': return repository.reviewTask(request.key, request.status, request.comment);
     case 'recordVerification': return repository.recordVerification(request.key, request.evidence);
-    case 'updateSettings': return repository.updateSettings(request.patch);
+    case 'updateSettings': return updateSettings(request.patch);
     case 'deleteTask': return repository.deleteTask(request.key);
     case 'deleteMission': return repository.deleteMission(request.id, request.deleteTasks);
     case 'purgeAll': return repository.purgeAll();
@@ -42,7 +52,7 @@ async function dispatch(request: RpcRequest): Promise<unknown> {
   }
 }
 const ready = (async () => {
-  await repository.updateSettings({ bridgeEnabled: false });
+  await updateSettings({ bridgeEnabled: false });
   await repository.setBridgeStatus('disabled');
   await repository.setConnection('claude-code', 'disconnected'); await repository.setConnection('codex', 'disconnected');
   await chrome.alarms.create('hub-maintenance', { periodInMinutes: 1 });

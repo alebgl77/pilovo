@@ -12,6 +12,7 @@ Dated 10 October 2026. This pilot observes a bounded set of web UI controls. Pro
 | Keyboard shortcuts / mark all as seen | Unreleased | The next-item shortcut reuses focus revalidation and skips an item the fresh sample no longer shows as needing review; mark all is local seen only. Command handling is unit-tested with mocked Chrome APIs; real key dispatch, macOS keys and conflicting extension shortcuts are not yet checked manually. |
 | Elapsed durations | Unreleased | Derived in the panel from the observed state's start; minute precision. They restart whenever evidence is lost (throttled or expired evidence, navigation, worker restart), so they can be shorter than the real time and are not provider generation times. Covered by unit tests and synthetic harness flows only. |
 | Toolbar badge | Best effort | Last observed unacknowledged attention; service-worker suspension can delay visual expiry. |
+| Badge colors, working mark and summary tooltip | Unreleased | The count takes the color of the most urgent reason; `…` shows live work with nothing to review; the tooltip gives counts and fixed reason words in the app's language. Same best-effort expiry as the badge. Covered by unit tests with mocked `chrome.action` only; rendering in a real toolbar (light/dark browser themes, platforms) and tooltip display are not yet checked manually. |
 | ChatGPT agent / Claude in Chrome | Not supported as dedicated integrations | Ordinary web indicators do not prove internal agent tasks, remote-browser state or extension state. |
 | Claude Code / Codex / native applications | Not supported | No live connector or external-process control is bundled. |
 | Stop / pause / resume / launch / OS notifications | Not supported | No such control commands or permission are exposed by this preview; keyboard commands only focus, open the side panel or acknowledge. |
@@ -29,6 +30,6 @@ These observations establish the existence and ambiguity of selected indicators 
 
 ## Freshness
 
-Observations and observer authorization leases expire logically after at most 15 seconds without renewal. Throttled or suspended tabs can miss heartbeats. The activity panel downgrades stale evidence to unknown; the toolbar uses a best-effort alarm/watchdog, so its visual badge cannot promise a hard real-time expiry. A restart requires fresh evidence and a newly witnessed working transition before response-ready attention.
+Observations and observer authorization leases expire logically after at most 15 seconds without renewal. Throttled or suspended tabs can miss heartbeats. The activity panel downgrades stale evidence to unknown; the toolbar uses a best-effort alarm/watchdog, so its visual badge, including the unreleased working mark and tooltip, cannot promise a hard real-time expiry. A restart requires fresh evidence and a newly witnessed working transition before response-ready attention.
 
 Any future 99% reliability or similar benchmark is a target requiring a defined corpus, denominator and measured results. No such target has been achieved or measured here.

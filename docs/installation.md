@@ -18,7 +18,7 @@ Enable ChatGPT or Claude from Pilovo. The optional site grant applies to that pr
 
 Working requires recognized evidence. Response ready requires witnessed work followed by stable ready evidence. Unknown means evidence is absent, inaccessible, stale or not supported by the current adapter; it does not mean the agent stopped. Use focus to inspect the provider directly. Marking an attention item seen only acknowledges it locally. Unreleased source also shows how long a row has been working or showing an item to review, seen or not; that duration restarts whenever evidence is lost, for example after expiry, navigation or a restart.
 
-Remove a site's access through Pilovo or Chrome's extension controls. Revocation invalidates observations and stops renewals; a local lease expires within 15 seconds logically. A suspended page may execute its cleanup later. The toolbar badge is last-observed attention, with best-effort expiry. It is not an OS notification.
+Remove a site's access through Pilovo or Chrome's extension controls. Revocation invalidates observations and stops renewals; a local lease expires within 15 seconds logically. A suspended page may execute its cleanup later. The toolbar badge is last-observed attention, with best-effort expiry. It is not an OS notification. Unreleased source colors it by the most urgent reason (red: visible error, amber-brown: input request, olive: response available), shows `…` while work is observed and nothing needs review, and summarizes the counts in text when you hover the icon, in the language chosen in Pilovo's settings.
 
 The [compatibility record](compatibility.md) lists the pilot's limits. Provider subscriptions and quotas remain separate.
 
@@ -60,6 +60,7 @@ Uninstall removes extension storage. Exports, backups, clipboard, provider conve
 5. Envoyez une consigne dans votre compte fournisseur. Pilovo indique l'état seulement si un signal compatible est observé.
 6. Si l'état est **Inconnu**, rejoignez l'onglet : la preuve peut manquer, expirer, être ralentie en arrière-plan ou correspondre à une interface non reconnue. Ne l'interprétez pas comme une fin. Depuis les sources (non publié), une durée indique depuis quand une ligne est en cours ou signale un élément à vérifier, vu ou non ; elle repart de zéro dès que la preuve est perdue.
 7. Retirez l'accès de chaque site depuis Pilovo ou Chrome quand vous le souhaitez.
-8. Raccourcis (non publiés, depuis les sources) : `Alt+Maj+J` rejoint le prochain élément à vérifier, ou ouvre le panneau s'il n'y a rien à vérifier. Pour le modifier, ou attribuer une touche à **Marquer tous les éléments à vérifier comme vus**, ouvrez `chrome://extensions/shortcuts`.
+8. Badge (non publié, depuis les sources) : rouge pour une erreur visible, brun ambré pour une intervention demandée, olive pour une réponse disponible ; « … » signale un travail observé quand rien n'est à vérifier. Au survol de l'icône, un résumé en texte, dans la langue des paramètres de Pilovo, reprend ces nombres.
+9. Raccourcis (non publiés, depuis les sources) : `Alt+Maj+J` rejoint le prochain élément à vérifier, ou ouvre le panneau s'il n'y a rien à vérifier. Pour le modifier, ou attribuer une touche à **Marquer tous les éléments à vérifier comme vus**, ouvrez `chrome://extensions/shortcuts`.
 
 Le cœur de Pilovo est gratuit. Aucun compte Pilovo, clé API ou compagnon à installer. Le Chrome Web Store serait un parcours futur plus simple, sous réserve d'une soumission acceptée ; ce pilote s'installe manuellement.

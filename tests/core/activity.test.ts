@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebActivity, type ActivityAccess } from '../../src/background/activity';
 import { makeUnknown, newActivityRecord, reduceActivity } from '../../src/background/activity-reducer';
+import { BADGE_COLORS, BADGE_TEXT_COLOR } from '../../src/background/activity-badge';
 import { activityHintSchema, activitySampleSchema, ACTIVITY_TTL, type ActivityEvidence, type ActivityLease } from '../../src/shared/activity';
 
 describe('conservative activity reducer', () => {
@@ -84,6 +85,7 @@ const hint = (sequence = 1) => ({ channel: 'pilovo.observe', version: 1, activat
 const sender = () => ({ id: 'extension', frameId: 0, documentId, documentLifecycle: 'active', url: currentTab().url, tab: currentTab() });
 const tick = async (ms = 0) => { now += ms; await vi.advanceTimersByTimeAsync(ms); };
 const row = () => activity.snapshot().observations[0];
+const painted = () => vi.mocked(access.badge).mock.lastCall?.[0];
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; };
 beforeEach(() => {
   vi.useFakeTimers(); now = 1_000_000; evidence = 'working'; documentId = 'chrome-document'; activationId = crypto.randomUUID();
@@ -104,7 +106,7 @@ describe('leased worker observations', () => {
     evidence = 'idle_ready'; await activity.hint(hint(), sender()); await tick(1000); expect(row().state).toBe('working');
     await tick(1000); expect(row().state).toBe('attention');
     const observed = row(); activity.acknowledge(observed.id, observed.attention!.id); await tick();
-    expect(row().attention!.acknowledged).toBe(true); expect(access.badge).toHaveBeenLastCalledWith('');
+    expect(row().attention!.acknowledged).toBe(true); expect(painted()).toMatchObject({ text: '', title: 'Pilovo' });
     await activity.hint(hint(2), sender()); await tick(1000); expect(row().attention!.id).toBe(observed.attention!.id);
     const focusing = activity.focus(observed.id); await tick(1000); await focusing; expect(access.focus).toHaveBeenCalledOnce();
     expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|title|prompt|responseText|documentId|activationId/);
@@ -133,6 +135,21 @@ describe('leased worker observations', () => {
     activity.start(); await tick(); now += ACTIVITY_TTL; expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
     await expect(activity.focus(row().id)).rejects.toMatchObject({ code: 'navigation.expired' });
   });
+  it.each([['working', '…', 'Pilovo — 1 en cours'], ['input_required', '1', 'Pilovo — 1 à vérifier (intervention demandée)']] as const)('clears a %s badge at expiry by the watchdog alone, on a fractional clock', async (value, text, title) => {
+    // The real clock is fractional and setTimeout truncates its delay, so a watchdog armed on the exact remaining time can
+    // run a fraction of a millisecond before validUntil. Here the clock follows the fake timers and each sample takes 0.4 ms.
+    const start = Date.now(); let latency = 0.5;
+    access.now = () => 1_000_000 + (Date.now() - start) + latency;
+    const reply = vi.mocked(access.sample).getMockImplementation()!;
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => { latency += 0.4; return reply(tabId, lease); });
+    evidence = value; activity.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(painted()).toMatchObject({ text, title });
+    const { validUntil } = row(); expect(validUntil - access.now()).toBeCloseTo(ACTIVITY_TTL - 0.4, 6);
+    // No snapshot, hint, acknowledgement or alarm: only the timers run, to just past validUntil.
+    await vi.advanceTimersByTimeAsync(Math.ceil(validUntil - access.now()) + 1);
+    expect(painted()).toMatchObject({ text: '', title: 'Pilovo' });
+    expect((activity as unknown as { records: Map<number, { observation: { state: string; unknownReason?: string } }> }).records.get(1)!.observation).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
+  });
   it('invalidates same-URL reloads, SPA routes, frozen/discarded tabs and removes closed tabs', async () => {
     activity.start(); await tick(); const oldId = row().id;
     activity.updateTab(1, { status: 'loading' }, { ...currentTab(), status: 'loading' }); expect(row().state).toBe('unknown');
@@ -145,7 +162,7 @@ describe('leased worker observations', () => {
     activity.start(); await tick(); const old = row().id;
     activationId = crypto.randomUUID(); evidence = 'idle_ready'; await activity.hint(hint(), sender()); await tick(1000);
     expect(row().state).toBe('idle'); expect(row().id).not.toBe(old);
-    activity = new WebActivity(access); expect(activity.snapshot().observations).toEqual([]); await tick(); expect(access.badge).toHaveBeenLastCalledWith('');
+    activity = new WebActivity(access); expect(activity.snapshot().observations).toEqual([]); await tick(); expect(painted()).toMatchObject({ text: '', title: 'Pilovo' });
     activity.start(); await tick(); expect(row().state).toBe('idle');
   });
   it('clears a revoked grant immediately and rejects a sample released after rapid regrant', async () => {
@@ -332,18 +349,19 @@ describe('next attention and mark all as seen', () => {
     const first = activity.focusNextAttention(), second = activity.focusNextAttention();
     expect(second).toBe(first); await tick(1000); expect(await first).toBe('focused'); expect(focused()).toEqual([2]);
   });
-  it('marks every current attention as seen locally, returns the count and clears the badge', async () => {
+  it('marks every current attention as seen locally, returns the count and lowers the badge to the remaining work', async () => {
     activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'error_visible');
-    expect(access.badge).toHaveBeenLastCalledWith('2');
+    expect(painted()).toMatchObject({ text: '2', background: BADGE_COLORS.error_visible });
     const before = activity.snapshot().observations; vi.mocked(access.notify).mockClear();
     expect(activity.acknowledgeAll()).toBe(2); await tick();
-    expect(access.badge).toHaveBeenLastCalledWith(''); expect(access.notify).toHaveBeenCalled();
+    // Tab 3 still works: the badge drops the count and shows work in progress.
+    expect(painted()).toMatchObject({ text: '…', background: BADGE_COLORS.working, title: 'Pilovo — 1 en cours' }); expect(access.notify).toHaveBeenCalled();
     const after = activity.snapshot().observations;
     expect(after.map(observation => observation.attention && { ...observation.attention, acknowledged: false })).toEqual(before.map(observation => observation.attention));
     expect(after.filter(observation => observation.attention).every(observation => observation.attention!.acknowledged)).toBe(true);
     expect(byTab(3)).toMatchObject({ state: 'working' }); expect(access.focus).not.toHaveBeenCalled();
     expect(activity.acknowledgeAll()).toBe(0);
-    await raise(3, 'input_required'); expect(byTab(3).attention!.acknowledged).toBe(false); expect(access.badge).toHaveBeenLastCalledWith('1');
+    await raise(3, 'input_required'); expect(byTab(3).attention!.acknowledged).toBe(false); expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.input_required, textColor: BADGE_TEXT_COLOR });
     expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|documentId|activationId/);
   });
   it('limits mark all to the attention identities shown and ignores replaced, unknown or expired ones', async () => {
@@ -352,8 +370,93 @@ describe('next attention and mark all as seen', () => {
     await raise(2, 'error_visible');
     expect(activity.acknowledgeAll([...shown, crypto.randomUUID()])).toBe(1); await tick();
     expect(byTab(1).attention!.acknowledged).toBe(true); expect(byTab(2).attention).toMatchObject({ reason: 'error_visible', acknowledged: false });
-    expect(access.badge).toHaveBeenLastCalledWith('1');
+    expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.error_visible });
     now += ACTIVITY_TTL; expect(activity.acknowledgeAll()).toBe(0);
     expect(activity.snapshot().observations.every(observation => observation.state === 'unknown' && !observation.attention)).toBe(true);
+  });
+});
+
+describe('differentiated toolbar badge', () => {
+  const evidenceFor = new Map<number, ActivityEvidence>(), documents = new Map<number, string>(), activations = new Map<number, string>();
+  const tabOf = (id: number) => ({ id, windowId: 2, url: `https://chatgpt.com/c/PRIVATE_URL_CANARY_${id}`, status: 'complete' });
+  const byTab = (tabId: number) => activity.snapshot().observations.find(observation => observation.tabId === tabId)!;
+  const paints = () => vi.mocked(access.badge).mock.calls.length;
+  const raise = async (tabId: number, value: ActivityEvidence) => { evidenceFor.set(tabId, value); activity.updateTab(tabId, {}, tabOf(tabId)); await tick(1000); };
+  // Witnessed work, then two ready reads one second apart (the sample after the first is rescheduled by the debounce).
+  const ready = async (tabId: number) => { await raise(tabId, 'working'); await raise(tabId, 'idle_ready'); await tick(1000); expect(byTab(tabId).attention!.reason).toBe('response_ready'); };
+  const lit = (text: string, background: string, title: string) => ({ text, background, textColor: BADGE_TEXT_COLOR, title });
+  const hidden = { text: '', title: 'Pilovo' };
+  beforeEach(() => {
+    for (const id of [1, 2, 3]) { evidenceFor.set(id, 'idle_ready'); documents.set(id, `document-${id}`); activations.set(id, crypto.randomUUID()); }
+    vi.mocked(access.tabs).mockImplementation(async () => [1, 2, 3].map(tabOf));
+    vi.mocked(access.tab).mockImplementation(async id => tabOf(id));
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: evidenceFor.get(tabId)! } }]);
+  });
+  it('paints none, working only, response ready, input plus ready and error plus others from live observations', async () => {
+    activity.start(); await tick(); expect(activity.snapshot().observations.map(observation => observation.state)).toEqual(['idle', 'idle', 'idle']);
+    expect(painted()).toMatchObject(hidden); expect(paints()).toBe(1);
+    await raise(1, 'working'); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 1 en cours'));
+    await raise(2, 'working'); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 2 en cours'));
+    await raise(2, 'idle_ready'); await tick(1000); expect(byTab(2).attention!.reason).toBe('response_ready');
+    expect(painted()).toEqual(lit('1', BADGE_COLORS.response_ready, 'Pilovo — 1 à vérifier (réponse disponible) · 1 en cours'));
+    await raise(3, 'input_required'); expect(painted()).toEqual(lit('2', BADGE_COLORS.input_required, 'Pilovo — 2 à vérifier, dont 1 intervention demandée · 1 en cours'));
+    await raise(1, 'error_visible'); expect(painted()).toEqual(lit('3', BADGE_COLORS.error_visible, 'Pilovo — 3 à vérifier, dont 1 erreur visible'));
+    // Seen attention leaves the count, and so the color, to what still needs review.
+    activity.acknowledge(byTab(1).id, byTab(1).attention!.id); await tick();
+    expect(painted()).toEqual(lit('2', BADGE_COLORS.input_required, 'Pilovo — 2 à vérifier, dont 1 intervention demandée'));
+    activity.acknowledge(byTab(3).id, byTab(3).attention!.id); await tick(); expect(painted()).toEqual(lit('1', BADGE_COLORS.response_ready, 'Pilovo — 1 à vérifier (réponse disponible)'));
+    // Acknowledged attention only: hidden, whatever its reason.
+    expect(activity.acknowledgeAll()).toBe(1); await tick(); expect(painted()).toMatchObject(hidden);
+    expect(activity.snapshot().observations.every(observation => observation.state === 'attention' && observation.attention!.acknowledged)).toBe(true);
+    expect(JSON.stringify(vi.mocked(access.badge).mock.calls)).not.toMatch(/PRIVATE_URL|https:|chatgpt|ChatGPT|session|document-|[0-9a-f]{8}-[0-9a-f]{4}-/);
+  });
+  it('downgrades through the expiry watchdog, and clears after revoke, tab close or a worker restart', async () => {
+    // Each sample runs at `tick()` time (the tab's 1 s rate window has passed), so the watchdog is armed on the test clock.
+    const sampleNow = async (tabId: number, value: ActivityEvidence) => { evidenceFor.set(tabId, value); activity.updateTab(tabId, {}, tabOf(tabId)); await tick(); };
+    activity.start(); await tick(); await tick(1000); await sampleNow(1, 'error_visible'); await sampleNow(2, 'working');
+    await tick(1000); await sampleNow(2, 'working');
+    expect(painted()).toEqual(lit('1', BADGE_COLORS.error_visible, 'Pilovo — 1 à vérifier (erreur visible) · 1 en cours'));
+    // No renewal and no snapshot read: idle tab 3 expires (no change), then the error, leaving the work, then the work.
+    const expiries = [byTab(3).validUntil, byTab(1).validUntil, byTab(2).validUntil];
+    expect(expiries).toEqual([now + 13_000, now + 14_000, now + 15_000]);
+    await tick(expiries[0] - now); await tick(); expect(painted()).toEqual(lit('1', BADGE_COLORS.error_visible, 'Pilovo — 1 à vérifier (erreur visible) · 1 en cours'));
+    await tick(expiries[1] - now); await tick(); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 1 en cours'));
+    await tick(expiries[2] - now); await tick(); expect(painted()).toMatchObject(hidden);
+    expect(activity.snapshot().observations.map(observation => [observation.state, observation.unknownReason])).toEqual([['unknown', 'expired'], ['unknown', 'expired'], ['unknown', 'expired']]);
+    await raise(1, 'input_required'); await raise(2, 'working'); expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.input_required });
+    activity.revoke('chatgpt-web'); await tick(); expect(painted()).toMatchObject(hidden);
+    activity.reconcile('chatgpt-web'); await tick(1000); expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.input_required, title: 'Pilovo — 1 à vérifier (intervention demandée) · 1 en cours' });
+    activity.invalidateTab(1, true); await tick(); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 1 en cours'));
+    activity.invalidateTab(2, true); await tick(); expect(painted()).toMatchObject(hidden);
+    await raise(3, 'error_visible'); expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.error_visible });
+    // A new worker life paints hidden before any evidence, then needs fresh evidence to light it again.
+    const before = paints(); activity = new WebActivity(access); await tick();
+    expect(paints()).toBe(before + 1); expect(painted()).toMatchObject(hidden);
+    activity.start(); await tick(); expect(painted()).toEqual(lit('2', BADGE_COLORS.error_visible, 'Pilovo — 2 à vérifier, dont 1 erreur visible · 1 en cours'));
+  });
+  it('makes no badge call while the painted value is unchanged and repaints after a failed call', async () => {
+    activity.start(); await tick(); expect(paints()).toBe(1);
+    for (let step = 0; step < 3; step++) await raise(1, 'idle_ready');
+    expect(paints()).toBe(1);
+    await raise(1, 'working'); expect(paints()).toBe(2);
+    for (let step = 0; step < 3; step++) await raise(1, 'working');
+    expect(activity.acknowledgeAll()).toBe(0); await tick(); expect(paints()).toBe(2);
+    vi.mocked(access.badge).mockRejectedValueOnce(new Error('action unavailable'));
+    await raise(2, 'input_required'); expect(paints()).toBe(3);
+    // The same value is attempted again on the next change, then remembered.
+    await raise(2, 'input_required'); expect(paints()).toBe(4); expect(vi.mocked(access.badge).mock.calls[3][0]).toEqual(vi.mocked(access.badge).mock.calls[2][0]);
+    await raise(2, 'input_required'); expect(paints()).toBe(4);
+  });
+  it('follows the app language for the title only, without repainting when it does not change', async () => {
+    activity.start(); await tick(); await raise(1, 'input_required'); await ready(2); await raise(3, 'working');
+    expect(painted()).toEqual(lit('2', BADGE_COLORS.input_required, 'Pilovo — 2 à vérifier, dont 1 intervention demandée · 1 en cours'));
+    const count = paints();
+    activity.setLanguage('fr'); await tick(); expect(paints()).toBe(count);
+    activity.setLanguage('en'); await tick(); expect(paints()).toBe(count + 1);
+    expect(painted()).toEqual(lit('2', BADGE_COLORS.input_required, 'Pilovo — 2 to review, including 1 input request · 1 working'));
+    activity.setLanguage('en'); await tick(); expect(paints()).toBe(count + 1);
+    // Unexpected values fall back to the default language, French.
+    activity.setLanguage('de'); await tick(); expect(painted()!.title).toBe('Pilovo — 2 à vérifier, dont 1 intervention demandée · 1 en cours');
+    activity.setLanguage('en'); activity.acknowledgeAll(); await tick(); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 1 working'));
   });
 });

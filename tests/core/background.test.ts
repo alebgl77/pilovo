@@ -18,7 +18,7 @@ beforeEach(async () => {
     permissions: { contains: vi.fn().mockResolvedValue(true), request: vi.fn(), onRemoved: signal(), onAdded: signal() },
     tabs: { query: vi.fn().mockResolvedValue([{ id: 4, windowId: 1, url: 'https://claude.ai/chat/private', title: 'Private title' }]), get: vi.fn(), create: vi.fn().mockResolvedValue({ id: 5 }), update: vi.fn(), onCreated: signal(), onUpdated: signal(), onRemoved: signal(), onAttached: signal(), onDetached: signal(), onReplaced: signal() },
     scripting: { registerContentScripts: vi.fn().mockResolvedValue(undefined), unregisterContentScripts: vi.fn().mockResolvedValue(undefined), executeScript: vi.fn().mockResolvedValue([]) },
-    windows: { update: vi.fn(), getLastFocused: vi.fn().mockResolvedValue({ id: 3 }), onFocusChanged: signal() }, commands: { onCommand: signal(), getAll: vi.fn() }, alarms: { create: vi.fn().mockResolvedValue(undefined), onAlarm: signal() }, sidePanel: { setPanelBehavior: vi.fn().mockResolvedValue(undefined), open: vi.fn().mockResolvedValue(undefined) }, action: { onClicked: signal(), setBadgeText: vi.fn().mockResolvedValue(undefined), setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined) },
+    windows: { update: vi.fn(), getLastFocused: vi.fn().mockResolvedValue({ id: 3 }), onFocusChanged: signal() }, commands: { onCommand: signal(), getAll: vi.fn() }, alarms: { create: vi.fn().mockResolvedValue(undefined), onAlarm: signal() }, sidePanel: { setPanelBehavior: vi.fn().mockResolvedValue(undefined), open: vi.fn().mockResolvedValue(undefined) }, action: { onClicked: signal(), setBadgeText: vi.fn().mockResolvedValue(undefined), setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined), setBadgeTextColor: vi.fn().mockResolvedValue(undefined), setTitle: vi.fn().mockResolvedValue(undefined) },
   };
   vi.stubGlobal('chrome', api);
   const { HubRepository } = await import('../../src/domain/repository'); const seed = new HubRepository(); await seed.snapshot(); await seed.close();
@@ -117,6 +117,85 @@ describe('standalone service worker trust boundary', () => {
     listener('acknowledge-all-attention', { id: 4, windowId: 1 }); await vi.advanceTimersByTimeAsync(0);
     expect((await rpc({ method: 'getWebActivity' })).data.observations[0].attention).toEqual({ ...observation.attention, acknowledged: true });
     expect(api.action.setBadgeText).toHaveBeenLastCalledWith({ text: '' });
+  });
+  it('paints a differentiated badge and a title in the app language, sending only the parts that changed', async () => {
+    // The first paint of the worker clears whatever a previous worker life left; a hidden badge needs no color.
+    expect(api.action.setBadgeText).toHaveBeenCalledExactlyOnceWith({ text: '' }); expect(api.action.setTitle).toHaveBeenCalledExactlyOnceWith({ title: 'Pilovo' });
+    expect(api.action.setBadgeBackgroundColor).not.toHaveBeenCalled(); expect(api.action.setBadgeTextColor).not.toHaveBeenCalled();
+    const tab = { id: 4, windowId: 1, url: 'https://claude.ai/chat/private', status: 'complete' }, activationId = crypto.randomUUID();
+    let evidence = 'working';
+    api.tabs.get.mockResolvedValue(tab);
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence } }] : []);
+    const names = ['setBadgeText', 'setBadgeBackgroundColor', 'setBadgeTextColor', 'setTitle'], painted: unknown[] = [];
+    const action = () => Object.fromEntries(names.map(name => [name, api.action[name].mock.calls.map(([details]: any[]) => Object.values(details)[0])]));
+    const sample = async (value: string) => { evidence = value; api.tabs.onUpdated.emit(4, { status: 'complete' }, tab); await vi.advanceTimersByTimeAsync(1100); };
+    // Every call is kept for the final privacy check before the mocks are cleared.
+    const clear = () => { painted.push(action()); for (const name of names) api.action[name].mockClear(); };
+    clear(); await sample('working');
+    expect(action()).toEqual({ setBadgeText: ['…'], setBadgeBackgroundColor: ['#5E5E5C'], setBadgeTextColor: ['#FFFFFF'], setTitle: ['Pilovo — 1 en cours'] });
+    clear(); await sample('working'); expect(Object.values(action()).flat()).toEqual([]);
+    clear(); await sample('input_required');
+    expect(action()).toEqual({ setBadgeText: ['1'], setBadgeBackgroundColor: ['#8A4B08'], setBadgeTextColor: [], setTitle: ['Pilovo — 1 à vérifier (intervention demandée)'] });
+    // Language follows the app's settings through the updateSettings RPC: only the title changes.
+    clear(); expect((await rpc({ method: 'updateSettings', patch: { language: 'en' } })).data.language).toBe('en');
+    expect(action()).toEqual({ setBadgeText: [], setBadgeBackgroundColor: [], setBadgeTextColor: [], setTitle: ['Pilovo — 1 to review (input request)'] });
+    clear(); await rpc({ method: 'updateSettings', patch: { theme: 'dark' } }); await rpc({ method: 'updateSettings', patch: { language: 'en' } }); expect(Object.values(action()).flat()).toEqual([]);
+    // Concurrent writes: the title ends in the language of the last committed call.
+    await Promise.all([rpc({ method: 'updateSettings', patch: { language: 'fr' } }), rpc({ method: 'updateSettings', patch: { language: 'en' } })]);
+    expect(api.action.setTitle).toHaveBeenLastCalledWith({ title: 'Pilovo — 1 to review (input request)' }); expect((await rpc({ method: 'getSnapshot' })).data.settings.language).toBe('en');
+    clear();
+    expect(await rpc({ method: 'updateSettings', patch: { language: 'de' } })).toMatchObject({ ok: false, error: { code: 'validation.invalid' } }); expect(Object.values(action()).flat()).toEqual([]);
+    const [observation] = (await rpc({ method: 'getWebActivity' })).data.observations;
+    clear(); await rpc({ method: 'acknowledgeWebActivity', id: observation.id, attentionId: observation.attention.id }); await vi.advanceTimersByTimeAsync(0);
+    expect(action()).toEqual({ setBadgeText: [''], setBadgeBackgroundColor: [], setBadgeTextColor: [], setTitle: ['Pilovo'] });
+    // Hidden, the title is the same in both languages: switching back sends nothing.
+    clear(); await rpc({ method: 'updateSettings', patch: { language: 'fr' } }); expect(Object.values(action()).flat()).toEqual([]);
+    clear(); expect(JSON.stringify(painted)).toMatch(/Pilovo — 1 to review/); expect(JSON.stringify(painted)).not.toMatch(/private|claude|document-4|Private title/i);
+  });
+  it('reads the language at startup, recovers from a failed paint and guards setBadgeTextColor', async () => {
+    await rpc({ method: 'updateSettings', patch: { language: 'en' } });
+    // A restarted worker: fresh listeners and module state, persisted settings, no setBadgeTextColor (before Chrome 110).
+    for (const area of [api.runtime, api.permissions, api.tabs, api.windows, api.commands, api.alarms, api.action]) for (const key of Object.keys(area)) if (/^on[A-Z]/.test(key)) area[key] = signal();
+    for (const name of ['setBadgeText', 'setBadgeBackgroundColor', 'setTitle']) api.action[name].mockClear();
+    delete api.action.setBadgeTextColor;
+    vi.resetModules(); await import('../../src/background/index'); expect((await rpc({ method: 'getSnapshot' })).data.settings.language).toBe('en');
+    expect(api.action.setBadgeText).toHaveBeenCalledExactlyOnceWith({ text: '' }); expect(api.action.setTitle).toHaveBeenCalledExactlyOnceWith({ title: 'Pilovo' });
+    // Startup sampling finds no controller result and observes nothing, so nothing is painted.
+    await vi.advanceTimersByTimeAsync(1100); expect(api.action.setBadgeText).toHaveBeenCalledOnce();
+    const tab = { id: 4, windowId: 1, url: 'https://claude.ai/chat/private', status: 'complete' }, activationId = crypto.randomUUID();
+    api.tabs.get.mockResolvedValue(tab);
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence: 'error_visible' } }] : []);
+    api.action.setBadgeText.mockRejectedValueOnce(new Error('action unavailable'));
+    api.tabs.onUpdated.emit(4, { status: 'complete' }, tab); await vi.advanceTimersByTimeAsync(1100);
+    expect(api.action.setBadgeBackgroundColor).toHaveBeenLastCalledWith({ color: '#B42318' }); expect(api.action.setBadgeText).toHaveBeenLastCalledWith({ text: '1' }); expect(api.action.setTitle).toHaveBeenCalledTimes(1);
+    // The failed paint is retried as a whole on the next change, here the same evidence sampled again.
+    api.tabs.onUpdated.emit(4, { status: 'complete' }, tab); await vi.advanceTimersByTimeAsync(1100);
+    expect(api.action.setBadgeBackgroundColor).toHaveBeenCalledTimes(2); expect(api.action.setBadgeText).toHaveBeenCalledTimes(3);
+    expect(api.action.setTitle).toHaveBeenLastCalledWith({ title: 'Pilovo — 1 to review (visible error)' });
+    api.tabs.onRemoved.emit(4); await vi.advanceTimersByTimeAsync(0);
+    expect(api.action.setBadgeText).toHaveBeenLastCalledWith({ text: '' }); expect(api.action.setTitle).toHaveBeenLastCalledWith({ title: 'Pilovo' });
+  });
+  it('keeps the title in the persisted language when a settings call fails late or an older reply arrives last', async () => {
+    const { HubRepository } = await import('../../src/domain/repository'), { HubError } = await import('../../src/shared/errors');
+    const tab = { id: 4, windowId: 1, url: 'https://claude.ai/chat/private', status: 'complete' }, activationId = crypto.randomUUID();
+    api.tabs.get.mockResolvedValue(tab);
+    api.scripting.executeScript.mockImplementation(async (injection: any) => injection.args?.[0]?.requestId ? [{ frameId: 0, documentId: 'document-4', result: { version: 1, requestId: injection.args[0].requestId, activationId, evidence: 'working' } }] : []);
+    api.tabs.onUpdated.emit(4, { status: 'complete' }, tab); await vi.advanceTimersByTimeAsync(1100);
+    expect(api.action.setTitle).toHaveBeenLastCalledWith({ title: 'Pilovo — 1 en cours' });
+    // The settings write commits, then the separate retention cleanup write fails: the call fails, the language is saved.
+    vi.spyOn(HubRepository.prototype, 'cleanup').mockRejectedValueOnce(new HubError('storage.failed'));
+    expect(await rpc({ method: 'updateSettings', patch: { language: 'en' } })).toMatchObject({ ok: false, error: { code: 'storage.failed' } });
+    expect((await rpc({ method: 'getSnapshot' })).data.settings.language).toBe('en');
+    expect(api.action.setTitle).toHaveBeenLastCalledWith({ title: 'Pilovo — 1 working' });
+    // Two calls whose replies arrive in reverse order: the older one cannot restore its language over the newer one.
+    const settings = (await rpc({ method: 'getSnapshot' })).data.settings, replies: ((value: unknown) => void)[] = [];
+    const spy = vi.spyOn(HubRepository.prototype, 'updateSettings').mockImplementation(() => new Promise(resolve => { replies.push(resolve); }) as never);
+    const older = rpc({ method: 'updateSettings', patch: { language: 'fr' } }), newer = rpc({ method: 'updateSettings', patch: { language: 'en' } });
+    await vi.waitFor(() => expect(replies).toHaveLength(2));
+    replies[1]({ ...settings, language: 'en' }); expect((await newer).ok).toBe(true);
+    replies[0]({ ...settings, language: 'fr' }); expect((await older).ok).toBe(true);
+    expect(api.action.setTitle).toHaveBeenLastCalledWith({ title: 'Pilovo — 1 working' });
+    spy.mockRestore();
   });
   it('permits fixed provider opening after denial and refuses removed generic tab capability', async () => {
     api.permissions.contains.mockResolvedValue(false); expect((await rpc({ method: 'openWebProvider', provider: 'chatgpt-web' })).ok).toBe(true); expect(api.tabs.create).toHaveBeenCalledWith({ url: 'https://chatgpt.com/', active: true });

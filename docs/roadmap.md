@@ -10,6 +10,7 @@ Proposed work, not a delivery commitment. The [activity PRD](activity-manager-pr
 | Unreleased: next-attention keyboard shortcut and local mark all as seen | Manual real-key checks across platforms and with conflicting extension shortcuts |
 | Unreleased: ephemeral working/attention elapsed durations | Check against real provider sessions how often throttling or lost evidence restarts them |
 | Last-observed toolbar attention badge | Measure MV3 watchdog delays; no strict real-time guarantee |
+| Unreleased: badge colored by the most urgent reason, working mark and counts-only tooltip | Check legibility in real toolbars, browser themes and platforms |
 | Separate local preparations, notes, missions/export | Study recovery needs before designing import/sync |
 | EN/FR interface and manual unpacked install | Screen reader/zoom review; consider store submission for simpler onboarding |
 

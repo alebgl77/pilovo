@@ -64,6 +64,10 @@ try {
   await expect.poll(states).toEqual(['attention']);
   const observation = (await activity()).observations[0]; assert.equal(observation.attention.reason, 'response_ready');
   await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('1');
+  // Response ready: brand olive with white text; the default French settings word the title.
+  assert.deepEqual(await ui.evaluate(() => chrome.action.getBadgeBackgroundColor({})), [75, 93, 58, 255]);
+  assert.deepEqual(await ui.evaluate(() => chrome.action.getBadgeTextColor({})), [255, 255, 255, 255]);
+  await expect.poll(() => ui.evaluate(() => chrome.action.getTitle({}))).toBe('Pilovo — 1 à vérifier (réponse disponible)');
   const exportText = JSON.stringify(await rpc(ui, { method: 'exportData' }));
   assert.ok(!exportText.includes(canary)); assert.ok(!JSON.stringify(await activity()).includes(canary));
   record('observed work plus two positive completion reads create one metadata-only attention and badge');
@@ -72,6 +76,7 @@ try {
   assert.equal(await ui.evaluate(async () => (await chrome.tabs.query({ active: true }))[0].id), observation.tabId);
   await rpc(ui, { method: 'acknowledgeWebActivity', id: observation.id, attentionId: observation.attention.id });
   await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  await expect.poll(() => ui.evaluate(() => chrome.action.getTitle({}))).toBe('Pilovo');
   record('focus revalidates ephemeral row and acknowledgement clears its badge');
 
   await provider.evaluate(() => document.querySelector('form button').setAttribute('aria-label', 'Arrêter'));
@@ -110,7 +115,9 @@ try {
   // With every product UI closed, the worker still updates the action badge.
   await ui.close();
   await provider.evaluate(() => document.querySelector('form button').setAttribute('aria-label', 'Stop generating'));
-  await expect.poll(() => worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  // Work with nothing to review shows the working mark, not a count.
+  await expect.poll(() => worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('…');
+  await expect.poll(() => worker.evaluate(() => chrome.action.getTitle({}))).toBe('Pilovo — 1 en cours');
   await new Promise(resolve => setTimeout(resolve, 2200));
   await provider.evaluate(() => {
     document.querySelector('form button').setAttribute('aria-label', 'Start voice mode');

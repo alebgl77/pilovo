@@ -4,6 +4,7 @@ import { HubError } from '../shared/errors';
 import { eligibleWebTab, matchesWebProvider, type WebTab } from '../platform/web';
 import { makeUnknown, newActivityRecord, reduceActivity, type ActivityRecord } from './activity-reducer';
 import { disposeInstalledController, sampleInstalledController } from './activity-injection';
+import { activityBadge, activityLanguage, sameBadge, type ActivityBadge, type ActivityLanguage } from './activity-badge';
 
 export interface ActivityAccess {
   runtimeId: string;
@@ -16,7 +17,7 @@ export interface ActivityAccess {
   sample(tabId: number, lease: ActivityLease): Promise<{ documentId?: string; frameId: number; result?: unknown }[]>;
   dispose(tabId: number, grantId: string): Promise<void>;
   focus(provider: WebProvider, tabId: number, stillCurrent: () => boolean): Promise<void>;
-  badge(text: string): Promise<void>;
+  badge(badge: ActivityBadge): Promise<void>;
   notify(): void;
   now(): number; wall(): number;
 }
@@ -33,8 +34,17 @@ export class WebActivity {
   private expiry?: ReturnType<typeof setTimeout>;
   private focusing?: Promise<'focused' | 'none' | 'failed'>;
   private badgeQueue = Promise.resolve();
+  private painted?: ActivityBadge;
+  private language: ActivityLanguage = 'fr';
   private available = true;
-  constructor(private readonly access: ActivityAccess) { this.paintBadge(''); }
+  // The first paint of each worker life clears a badge and title left by a previous one.
+  constructor(private readonly access: ActivityAccess) { this.paintBadge(); }
+
+  /** Follows the app's language setting (not the browser's). Only the toolbar title depends on it. */
+  setLanguage(language: unknown) {
+    const next = activityLanguage(language);
+    if (next !== this.language) { this.language = next; this.paintBadge(); }
+  }
 
   start() { for (const provider of WEB_PROVIDERS) this.reconcile(provider.id); }
   // Each provider has one serialized registration queue. Old revoke/unregister operations cannot race a regrant.
@@ -258,22 +268,30 @@ export class WebActivity {
   expire() {
     let changed = false;
     for (const record of this.records.values()) if (record.observation.validUntil <= this.access.now() && record.observation.unknownReason !== 'expired' && record.observation.unknownReason !== 'navigation') { makeUnknown(record, 'expired', this.access.now()); changed = true; }
-    if (changed) this.changed();
+    // Nothing expired yet (the watchdog may run a fraction of a millisecond early): watch the next deadline again.
+    if (changed) this.changed(); else this.arm();
   }
-  private paintBadge(text: string) { this.badgeQueue = this.badgeQueue.catch(() => undefined).then(() => this.access.badge(text)).catch(() => undefined); }
-  private changed() {
+  // Serialized paints; an unchanged value makes no Chrome call. A failed paint is forgotten, so the next change retries it.
+  private paintBadge() {
+    const badge = activityBadge([...this.records.values()].map(record => record.observation), this.access.now(), this.language);
+    if (this.painted && sameBadge(this.painted, badge)) return;
+    this.painted = badge;
+    this.badgeQueue = this.badgeQueue.catch(() => undefined).then(() => this.access.badge(badge)).catch(() => { if (this.painted === badge) this.painted = undefined; });
+  }
+  private changed() { this.paintBadge(); this.access.notify(); this.arm(); }
+  // The clock is fractional and setTimeout truncates its delay, so the watchdog rounds up past the earliest validUntil.
+  private arm() {
     clearTimeout(this.expiry);
     const now = this.access.now();
     const active = [...this.records.values()].map(record => record.observation).filter(observation => observation.validUntil > now);
-    const count = active.filter(observation => observation.state === 'attention' && observation.attention && !observation.attention.acknowledged).length;
-    this.paintBadge(count ? String(count) : ''); this.access.notify();
-    if (active.length) this.expiry = setTimeout(() => this.expire(), Math.max(1, Math.min(...active.map(observation => observation.validUntil)) - now));
+    if (active.length) this.expiry = setTimeout(() => this.expire(), Math.max(1, Math.ceil(Math.min(...active.map(observation => observation.validUntil)) - now) + 1));
   }
 }
 
 export function chromeActivityAccess(focus: ActivityAccess['focus'], notify: () => void): ActivityAccess {
   const providerInfo = (provider: WebProvider) => WEB_PROVIDERS.find(item => item.id === provider)!;
   const registration = (provider: WebProvider) => `pilovo-observer-${provider}`;
+  let shown: Partial<ActivityBadge> = {};
   return {
     runtimeId: chrome.runtime.id, now: monotonicEpoch, wall: Date.now, focus, notify,
     hasPermission: provider => chrome.permissions.contains({ origins: [providerInfo(provider).pattern] }),
@@ -283,6 +301,16 @@ export function chromeActivityAccess(focus: ActivityAccess['focus'], notify: () 
     install: async tabId => { await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', files: ['observer.js'] }); },
     sample: (tabId, lease) => chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', func: sampleInstalledController, args: [lease] }),
     dispose: async (tabId, grantId) => { await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', func: disposeInstalledController, args: [grantId] }); },
-    badge: async text => { await chrome.action.setBadgeText({ text }); if (text) await chrome.action.setBadgeBackgroundColor({ color: '#645744' }); },
+    badge: async badge => {
+      // Only the parts that differ from what this worker last painted are sent. Colors precede the text so a badge never
+      // appears in the previous color; a hidden badge leaves them as they are. After a failure, everything is resent.
+      try {
+        if (badge.text && shown.background !== badge.background) { await chrome.action.setBadgeBackgroundColor({ color: badge.background }); shown.background = badge.background; }
+        // Chrome 110+ (the manifest requires 120); without it Chrome picks a readable text color itself.
+        if (badge.text && shown.textColor !== badge.textColor && typeof chrome.action.setBadgeTextColor === 'function') { await chrome.action.setBadgeTextColor({ color: badge.textColor }); shown.textColor = badge.textColor; }
+        if (shown.text !== badge.text) { await chrome.action.setBadgeText({ text: badge.text }); shown.text = badge.text; }
+        if (shown.title !== badge.title) { await chrome.action.setTitle({ title: badge.title }); shown.title = badge.title; }
+      } catch (error) { shown = {}; throw error; }
+    },
   };
 }
