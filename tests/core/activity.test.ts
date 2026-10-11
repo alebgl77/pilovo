@@ -257,30 +257,45 @@ describe('leased worker observations', () => {
     activity.start(); await tick(); const oldId = row().id;
     const slow = deferred<Awaited<ReturnType<ActivityAccess['sample']>>>(); vi.mocked(access.sample).mockReturnValueOnce(slow.promise);
     await activity.hint(hint(), sender()); await tick(1000);
-    const focusing = activity.focus(oldId);
+    const focusing = expect(activity.focus(oldId)).rejects.toMatchObject({ code: 'navigation.changed' });
     slow.resolve([{ frameId: 0, documentId, result: { version: 1, requestId: crypto.randomUUID(), activationId, evidence } }]);
-    await tick(1000);
-    await expect(focusing).rejects.toMatchObject({ code: 'navigation.changed' }); expect(access.focus).not.toHaveBeenCalled();
+    await tick(1000); await focusing; expect(access.focus).not.toHaveBeenCalled();
     // The invalid in-flight result downgraded the row, so the old identity can no longer authorize activation.
     await expect(activity.focus(oldId)).rejects.toMatchObject({ code: 'navigation.expired' }); expect(access.focus).not.toHaveBeenCalled();
   });
   it('routine hints arriving while focus waits for the rate bound cannot take its sample slot', async () => {
-    activity.start(); await tick(); const oldId = row().id; const before = vi.mocked(access.sample).mock.calls.length;
+    // Real conditions: fractional monotonic time and executeScript latency. A hint's truncated delay used to arm a
+    // routine sample about 1 ms before focus woke, still in flight when focus checked the slot (navigation.changed).
+    const reply = vi.mocked(access.sample).getMockImplementation()!;
+    vi.mocked(access.sample).mockImplementation(async (tab, lease) => { await new Promise(resolve => setTimeout(resolve, 20)); return reply(tab, lease); });
+    activity.start(); await tick(100); const oldId = row().id; const before = vi.mocked(access.sample).mock.calls.length;
     const focusing = activity.focus(oldId);
-    // Real pages emit heartbeats and mutation hints during the 1 s wait; each used to arm a competing routine sample.
-    for (let i = 0; i < 4; i++) { await activity.hint(hint(i + 1), sender()); await tick(200); }
-    await tick(200); await focusing;
+    for (let i = 0; i < 4; i++) { now += 0.5; await activity.hint(hint(i + 1), sender()); await tick(200); }
+    await tick(300); await focusing;
     expect(access.focus).toHaveBeenCalledOnce();
     expect(vi.mocked(access.sample).mock.calls.length).toBe(before + 1);
     // Focus's own fresh sample served the hints it held back; routine scheduling then resumes normally.
     await tick(2000); expect(vi.mocked(access.sample).mock.calls.length).toBe(before + 1);
-    await activity.hint(hint(9), sender()); await tick(1000); expect(vi.mocked(access.sample).mock.calls.length).toBe(before + 2);
+    await activity.hint(hint(9), sender()); await tick(1100); expect(vi.mocked(access.sample).mock.calls.length).toBe(before + 2);
   });
-  it('a tab closed while focus waits is not resurrected by the deferred reschedule', async () => {
+  it('after awaiting an in-flight sample, focus still respects the per-tab rate bound before its own sample', async () => {
     activity.start(); await tick(); const oldId = row().id;
+    const slow = deferred<Awaited<ReturnType<ActivityAccess['sample']>>>(); vi.mocked(access.sample).mockReturnValueOnce(slow.promise);
+    await activity.hint(hint(), sender()); await tick(1000);
+    const started = now, calls = vi.mocked(access.sample).mock.calls.length, inFlight = vi.mocked(access.sample).mock.calls.at(-1)![1];
     const focusing = activity.focus(oldId);
+    await tick(50); slow.resolve([{ frameId: 0, documentId, result: { version: 1, requestId: inFlight.requestId, activationId, evidence } }]);
+    // Let focus resume at this instant so the harness clock and timers agree when it computes its wait.
+    await tick(0); await tick(100); expect(vi.mocked(access.sample).mock.calls.length).toBe(calls);
+    await tick(started + 990 - now); expect(vi.mocked(access.sample).mock.calls.length).toBe(calls); expect(access.focus).not.toHaveBeenCalled();
+    await tick(20); await focusing;
+    expect(vi.mocked(access.sample).mock.calls.length).toBe(calls + 1); expect(access.focus).toHaveBeenCalledOnce();
+  });
+  it('closing the tab while focus waits rejects focus and starts no further sample', async () => {
+    activity.start(); await tick(); const oldId = row().id;
+    const focusing = expect(activity.focus(oldId)).rejects.toMatchObject({ code: 'navigation.changed' });
     await activity.hint(hint(), sender()); activity.invalidateTab(1, true);
-    await tick(1000); await expect(focusing).rejects.toMatchObject({ code: 'navigation.changed' });
+    await tick(1000); await focusing;
     const calls = vi.mocked(access.sample).mock.calls.length; await tick(2000);
     expect(vi.mocked(access.sample).mock.calls.length).toBe(calls); expect(activity.snapshot().observations).toEqual([]);
   });

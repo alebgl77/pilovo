@@ -221,7 +221,7 @@ export class WebActivity {
     try {
       clearTimeout(slot.timer); slot.timer = undefined;
       // A routine sample already in flight settles within its own 2 s timeout; focus then takes its own sample.
-      if (slot.inFlight) await slot.settled;
+      if (slot.inFlight) { await slot.settled; if (!current()) throw new HubError('navigation.changed'); }
       const wait = Math.max(0, 1_000 - (this.access.now() - slot.lastStarted));
       if (wait) await new Promise(resolve => setTimeout(resolve, wait));
       if (!current() || slot.inFlight) throw new HubError('navigation.changed');
