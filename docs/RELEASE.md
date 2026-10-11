@@ -35,6 +35,8 @@ ZIP paths are sorted, timestamps fixed and content CRC checked by regression tes
 
 The same workflow includes project and installed production-dependency licenses in both ZIPs. The conservative inventory retains historical dependency notices even when absent from runtime. Deterministic and privacy boundaries must remain intact. Historical standalone/native packagers are not the current release workflow.
 
+`check:publication` validates local link targets but not `#anchors`; check anchors by hand after renaming a heading. When a release is cut, update `version` and `date-released` in `CITATION.cff`, the release links and "at a glance" tables in both READMEs, the install answers in `docs/faq.md` and `docs/faq.fr.md`, and both installation guides; change review dates only after reviewing those pages. Release dates in these docs use Central European time: GitHub records the v0.4.0 prerelease as published at 2026-10-09T23:33:05Z (UTC), which was 10 October in that time zone.
+
 ## Current evidence and gates
 
 | Check | 0.4.0 status |

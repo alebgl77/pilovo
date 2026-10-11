@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you refer to Pilovo, please cite it using these metadata."
+type: software
+title: "Pilovo"
+abstract: >-
+  Pilovo is an open-source Chrome extension (Manifest V3, MIT license) that
+  shows whether the ChatGPT and Claude web tabs you authorize are working, have
+  a response ready, need your attention or cannot be confirmed. It lists them
+  in Chrome's side panel and counts the items to review on its toolbar badge,
+  so you can return to the right tab. Pilovo observes a limited set of status indicators
+  locally, with optional access per site, and does not collect your prompts,
+  responses or tab titles. Version 0.4.0 is an experimental preview installed
+  manually from GitHub; it is not on the Chrome Web Store. Pilovo is an
+  independent project, not affiliated with or endorsed by the companies that
+  operate ChatGPT or Claude.
+authors:
+  - name: "Pilovo contributors"
+version: "0.4.0"
+date-released: 2026-10-10
+license: MIT
+repository-code: "https://github.com/alebgl77/pilovo"
+url: "https://github.com/alebgl77/pilovo"
+keywords:
+  - "Chrome extension"
+  - "Manifest V3"
+  - "side panel"
+  - "ChatGPT"
+  - "Claude"
+  - "local-first"
+  - "privacy"

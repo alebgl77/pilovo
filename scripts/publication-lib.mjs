@@ -3,7 +3,7 @@ import { deflateRawSync } from 'node:zlib';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-export const rootFiles = new Set(['README.md', 'PRODUCT.md', 'DESIGN.md', 'CONTRIBUTING.md', 'SECURITY.md', 'SUPPORT.md', 'CHANGELOG.md', 'CLAUDE.md', 'LICENSE', '.gitignore', 'package.json', 'package-lock.json', 'index.html', 'sidepanel.html', 'tsconfig.json', 'vite.config.ts', 'vitest.config.ts']);
+export const rootFiles = new Set(['README.md', 'PRODUCT.md', 'DESIGN.md', 'CONTRIBUTING.md', 'SECURITY.md', 'SUPPORT.md', 'CHANGELOG.md', 'CITATION.cff', 'CLAUDE.md', 'LICENSE', '.gitignore', 'package.json', 'package-lock.json', 'index.html', 'sidepanel.html', 'tsconfig.json', 'vite.config.ts', 'vitest.config.ts']);
 export const rootDirectories = new Set(['src', 'public', 'scripts', 'tests', 'docs', 'companion', '.github']);
 const excludedDirectories = new Set(['node_modules', 'dist', 'companion-dist', 'results', '.tmp', '.local', '.cache', '.git', '.codex', '.tierdecay', '.agents', 'work', 'release', 'outputs', 'test-results', 'testresults', 'playwright-report', 'blob-report', 'coverage', 'profiles', 'browser-profiles', 'secrets', 'credentials']);
 const sensitiveName = /(^\.env(?:\.|$)|\.(?:pem|key|p12|pfx|log)$|\.local\.json$|^(?:credentials?|secrets?|tokens?)(?:\.json|\.txt|\.toml|\.ya?ml)$|^(?:claude-code|codex)-config\.json$)/i;

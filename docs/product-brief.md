@@ -2,6 +2,8 @@
 
 **Keep your AI in view.** AI activity for Chrome.
 
+**Reference definition** (reused in the READMEs, the FAQ and `CITATION.cff`; update them together): Pilovo is an open-source Chrome extension (Manifest V3, MIT license) that shows whether the ChatGPT and Claude web tabs you authorize are working, have a response ready, need your attention or cannot be confirmed. It lists them in Chrome's side panel and counts the items to review on its toolbar badge, so you can return to the right tab. Pilovo observes a limited set of status indicators locally, with optional access per site, and does not collect your prompts, responses or tab titles.
+
 ## User and job
 
 Audience hypothesis: people working across ChatGPT and Claude web accounts who want to notice supported activity and return to the relevant tab. The hypothesis is unvalidated; no adoption, uniqueness or measured productivity claim is made.

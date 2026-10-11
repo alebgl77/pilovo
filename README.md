@@ -3,41 +3,75 @@
 **Keep your AI in view.**
 AI activity for Chrome · **0.4.0 Preview**
 
-Keep track of your ChatGPT and Claude tabs in one quiet workspace. See observed work, notice a response ready for attention, and return to the right session. Pilovo is an experimental Chrome preview.
+Pilovo is an open-source Chrome extension (Manifest V3, MIT license) that shows whether the ChatGPT and Claude web tabs you authorize are working, have a response ready, need your attention or cannot be confirmed. It lists them in Chrome's side panel and counts the items to review on its toolbar badge, so you can return to the right tab. Pilovo observes a limited set of status indicators locally, with optional access per site, and does not collect your prompts, responses or tab titles.
 
-![Pilovo — Keep your AI in view. Preview.](docs/media/pilovo-github-banner.png)
+Version 0.4.0 is an experimental preview for Chrome 120 or later, published as a GitHub prerelease on 10 October 2026 and installed manually; it is not on the Chrome Web Store. Pilovo's core is free under the MIT license; Pilovo has no backend or telemetry and needs no Pilovo account or API key. Pilovo is an independent project, not affiliated with or endorsed by the companies that operate ChatGPT or Claude.
 
-[Install](docs/installation.md) · [Français](docs/README.fr.md) · [Privacy](docs/privacy.md) · [Compatibility](docs/compatibility.md) · [Contribute](CONTRIBUTING.md)
+![Pilovo banner: P logo, the tagline "Keep your AI in view.", "AI activity for Chrome" and "ChatGPT + Claude · Preview", beside abstract activity rows. Illustration, not a product screenshot.](docs/media/pilovo-github-banner.png)
 
-![Animated tour of Pilovo: activity, open and seen, session numbers and names, settings, side panel. Synthetic data.](docs/media/pilovo-tour-en.gif)
+[Install](docs/installation.md) · [FAQ](docs/faq.md) · [Français](docs/README.fr.md) · [Privacy](docs/privacy.md) · [Compatibility](docs/compatibility.md) · [Changelog](CHANGELOG.md) · [Contribute](CONTRIBUTING.md)
+
+![Animated tour of the Pilovo Chrome extension with synthetic data: activity list, Open session and Mark as seen, session numbers and names, settings and side panel. Screens marked UNRELEASED show features available only when you build from source.](docs/media/pilovo-tour-en.gif)
 
 *Actual interface from the current source, rendered with synthetic local activity fixtures. Not a real provider session or execution proof. Screens marked UNRELEASED are available only when you build from source.*
 
-## Keep track of the tabs you authorize
+## Pilovo at a glance
+
+Facts about the 0.4.0 release. Last reviewed: 11 October 2026.
+
+| Item | Pilovo 0.4.0 |
+| --- | --- |
+| Category | Chrome extension (Manifest V3) with a side panel and a full-page view |
+| Observed services | ChatGPT (`https://chatgpt.com/*`) and Claude (`https://claude.ai/*`) web pages in Chrome tabs; experimental adapters for their English and French interfaces |
+| States shown | Working, waiting, response ready (**Response available**), input requested, error visible, unknown (**Observation interrupted**) |
+| Release | 0.4.0 Preview, [GitHub prerelease](https://github.com/alebgl77/pilovo/releases/tag/v0.4.0) of 10 October 2026; manual install with **Load unpacked**; not on the Chrome Web Store |
+| Requirements | Chrome 120 or later; no Pilovo account, API key or companion |
+| Permissions | Required: `storage`, `sidePanel`, `alarms`, `scripting`. Optional, one site at a time: `https://chatgpt.com/*`, `https://claude.ai/*` |
+| Data | Prompts, responses and tab titles are not collected; activity stays in memory; no backend, telemetry or model API |
+| Interface | English and French; light, dark or system theme |
+| License | MIT; the core is free |
+
+## Keep track of the ChatGPT and Claude tabs you authorize
 
 1. **Enable one site.** Grant optional access to ChatGPT or Claude separately. Access to one does not enable the other.
 2. **Work in your usual account.** Send your prompt in the provider's own interface. Pilovo observes recognized status controls; it does not collect your prompts, responses or tab titles.
 3. **Return when needed.** Open the matching tab or acknowledge an attention item as seen. Seen means you noticed it, not that the task succeeded.
 
-The panel distinguishes working, response ready, recognized requests for attention, and unknown or expired evidence. Response ready requires witnessed work followed by a recognized ready signal and debounce. A tab merely being open, a disappearing button or an old completion announcement is insufficient.
+### What the states mean
 
-**Keyboard shortcuts** (unreleased; build from source until the next release). Press `Alt+Shift+J` (`Option+Shift+J` on macOS) to go to the next item to review: the earliest unacknowledged attention, revalidated like **Open session** and skipped for the next one if the fresh check shows it no longer needs review. When nothing needs review, it opens the side panel. **Mark all items to review as seen** has no default key; assign it, or change `Alt+Shift+J`, at `chrome://extensions/shortcuts`. When two or more items need review, the panel also offers **Mark all as seen**. Like a single acknowledgment, it is local and only means you noticed them.
+Each observed tab on an authorized site is one row. Working, Waiting, Response ready and Attention come only from recognized indicators in the page; anything else is shown as unknown.
 
-**Automatic seen** (unreleased; build from source; off by default). In **Settings**, **Mark as seen automatically** can be set to 5, 15 or 30 seconds. An item to review is then marked as seen once its own tab has stayed the active tab of the focused Chrome window for that long, with the side panel open beside it or not; Pilovo's full-page view, another tab, another window or another application in front does not count. Switching tabs or windows, leaving Chrome, navigating, closing the tab, removing that site's access, a new signal in the tab or a manual acknowledgment stops the wait, which restarts in full when the tab is in front again; just before marking, Pilovo asks Chrome again which tab is in front. When enabled, the activity page's footer states the delay. Like a manual acknowledgment, it is local and only means the tab was in front of you: it never verifies, approves or completes the task. To know which tab is in front, Pilovo reads only tab and window IDs and their active and focused flags, in the service worker's memory; no new permission is needed. The setting itself is saved with your other preferences and included in the export.
+| State | Panel label | What it means |
+| --- | --- | --- |
+| Working | **Working** | A recognized indicator shows a response being generated in the page. |
+| Response ready | **To review** · **Response available** | Pilovo observed work, then a stable ready signal after a short debounce. Generation has ended in the page; it does not mean the answer is correct or the task succeeded. |
+| Attention | **To review** · **Your input is requested** or **An error is visible in the page** | An explicitly recognized input request or visible error. |
+| Waiting | **Waiting** | The page is ready for your next message and no work is observed. |
+| Unknown | **Observation interrupted** (counted as **Unconfirmed**) | Evidence is missing, expired after 15 seconds, inaccessible or not recognized. It does not mean that generation stopped or finished. |
+| Seen | **Seen** | The item was marked as seen: a local acknowledgment, never verification. |
 
-**System notifications** (unreleased; build from source; off by default). In **Settings**, under **Activity**, **System notifications** has one checkbox per service, **Claude** and **ChatGPT**. Checking the first one asks Chrome for its optional `notifications` permission; if you refuse, nothing changes. Pilovo then shows a notification from your operating system when a new item to review appears for a checked service: a response available, input requested or an error visible. It contains only the service, the reason and the session number, for example **ChatGPT** · *Input requested · session 2*, never a session name, tab title, address or conversation content. There is none for the tab you are looking at (the active tab of the focused Chrome window) or for an item that was already there when you checked the service. When Chrome slows a background tab and the item's evidence lapses, the notification stays for up to 35 seconds and keeps standing for the same signal if Pilovo samples it again in that tab meanwhile, without notifying twice. Clicking it clears it and opens that session through the same revalidation as **Open session** (sampling the tab again first if its evidence had lapsed); it does not mark it as seen. Seeing the item (by hand, **Mark all as seen** or automatic seen), a newer signal, evidence lapsed for more than 35 seconds, navigation, closing the tab, removing that site's access or unchecking the service clears it. Unchecking the last service clears Pilovo's notifications, then removes Chrome's permission. If the permission is removed elsewhere, Chrome no longer lets Pilovo clear notifications already shown, so your system may keep them until you dismiss them (Pilovo clears them if you allow notifications again); Settings shows both services as off and lets you check one again. Your system decides how notifications are shown and may keep them in its notification center.
+A tab merely being open, a disappearing button or an old completion announcement proves neither work nor success.
 
-**Elapsed durations** (unreleased; build from source). A working row shows how long that work has been observed, for example **Working for 4 min**; an item to review, seen or not, shows how long its signal has been shown, for example **Available for 2 min**. Durations have minute precision and are computed in the panel's memory from the moment Pilovo observed the current state in that page. They are never saved, exported or sent. Because the evidence model is conservative, a duration restarts whenever Pilovo loses the evidence for that state: no recognized signal, a failed check of the page, expired evidence, navigation or reload, or a service-worker restart. It can therefore be shorter than the real time and is not a provider-reported generation time. When only the panel cannot confirm activity (a failed refresh, the activity service unavailable, or a site access change in progress), durations are hidden; they come back unchanged once fresh data confirms the same continuous observation.
+The toolbar badge shows how many last-observed items to review are still unseen. Evidence has a 15-second logical lifetime. Background tabs may be throttled; Chrome may suspend its service worker. The panel checks freshness, but badge cleanup uses a best-effort watchdog and is not a strict real-time notification guarantee. The 0.4.0 release sends no OS notifications; optional ones are listed under [Unreleased features](#unreleased-features-build-from-source).
 
-**Session numbers, positions and names** (unreleased; build from source). Each row keeps a stable number per service, for example **Claude · session 3**. Pilovo assigns it when it first observes the tab and keeps it while that tab stays open on that service, even when other tabs close or the page navigates. Numbering starts again after the extension's service worker restarts, and a tab that leaves the service and comes back gets a new number. A secondary line gives the tab's position in its window, for example **Tab 4**, and adds **other window** when the tab is not in the window showing Pilovo. To tell sessions apart, select the pencil button (**Name this session**) and type a name of up to 40 characters, for example *Contract review*; the row then reads **Contract review — Claude · session 3**, keeping the number that system notifications use. Enter or leaving the field applies the name, Escape cancels, and an empty name removes it. Naming needs current evidence, as opening a session does: a row whose evidence has expired can be renamed again once Pilovo observes it anew. The name is kept only in the extension's memory for that tab: it survives navigation in the tab, is shown only while the tab is on the service where you named it, and disappears when the tab closes, when you remove that site's access or when the service worker restarts. It is never stored, exported, sent, or shown on the toolbar badge or its tooltip. Pilovo still never shows tab titles or addresses.
-
-The toolbar badge shows how many last-observed items to review are still unseen. **Badge colors and summary** (unreleased; build from source): the count takes the color of the most urgent reason, red for a visible error, amber-brown for an input request, olive for a response available. With nothing to review but work observed, it shows `…` on gray instead of a count; seen items, waiting and unknown sessions never light it. Hovering Pilovo's icon gives the same summary in text, in the language chosen in Pilovo's settings, for example *Pilovo — 3 to review, including 1 visible error · 1 working*. The badge and its tooltip contain only counts and these fixed words, never a title, URL or conversation content. Evidence has a 15-second logical lifetime. Background tabs may be throttled; Chrome may suspend its service worker. The panel checks freshness, but badge cleanup uses a best-effort watchdog and is not a strict real-time notification guarantee. The 0.4.0 release sends no OS notifications; unreleased source adds the optional ones described above.
-
-![Pilovo activity panel with synthetic examples](docs/media/screenshots/Pilovo_activity_desktop_synthetic.png)
+![Pilovo activity page at side-panel width (360 px), in English, dark theme, with synthetic data: counters show 1 to review, 1 working and 1 unconfirmed; ChatGPT · session 2 is to review with Response available, Open session and Mark as seen; ChatGPT · session 1 is working; Claude · session 1 is waiting.](docs/media/screenshots/Pilovo_activity_360_dark_synthetic.png)
 
 *Actual interface rendered with synthetic local activity fixtures. These examples are not a real provider session or execution proof.*
 
+## Unreleased features (build from source)
+
+These features exist in the current source but not in the 0.4.0 release; build from source to use them. Tour screens that show them are marked UNRELEASED.
+
+- **Keyboard shortcuts:** `Alt+Shift+J` (`Option+Shift+J` on macOS) goes to the next item to review; **Mark all as seen** is offered in the panel when two or more items need review, and the **Mark all items to review as seen** command has no default key. [Details](docs/installation.md#keyboard-shortcuts)
+- **Automatic seen**, off by default: an item is marked as seen after its own tab stays in front for 5, 15 or 30 seconds; still a local acknowledgment only. [Details](docs/installation.md#automatic-seen)
+- **System notifications**, off by default, per service: one notification from your operating system for a new item to review in a tab you are not looking at, with only the service, the reason and the session number; Chrome's optional `notifications` permission is requested only when you click. [Details](docs/installation.md#system-notifications)
+- **Elapsed durations**, such as *Working for 4 min*: minute precision, never saved, restarted when evidence is lost. [Details](docs/installation.md#elapsed-durations)
+- **Stable session numbers, tab positions and names**: numbers that no longer change when other tabs close, and names of up to 40 characters kept in memory for the tab's lifetime, never stored or exported. [Details](docs/installation.md#session-numbers-positions-and-names)
+- **Badge colors and summary**: the count takes the color of the most urgent reason, `…` marks observed work, and the icon's tooltip gives only counts and fixed words. [Details](docs/installation.md#badge-colors-and-summary)
+
 ## Preview compatibility
+
+Pilovo observes only the ChatGPT and Claude websites in Chrome tabs: the desktop and mobile apps and other AI websites are not supported, and browsers other than Chrome 120+ are not tested.
 
 Initial adapters target English/French ChatGPT and Claude web interfaces. They are experimental, not universal agent coverage. On 10 October 2026, manual inspection observed ChatGPT's French streaming and completion indicators. Claude's attempted check was blocked by quota; its completion announcer still contained a finished message. Claude streaming was not captured. This is selector evidence, **not an authenticated end-to-end extension test**. Read the [compatibility record](docs/compatibility.md).
 
@@ -45,9 +79,9 @@ Pilovo offers focus and local acknowledgment. It does not stop, pause, resume or
 
 ## Install in Chrome
 
-Chrome 120+ is required. This is a manually installed preview; there is no Chrome Web Store approval. Use a reviewed `Pilovo_Chrome_v0.4.0.zip` if it is available in [Releases](https://github.com/alebgl77/pilovo/releases), or build from source below. Extract it, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, then select the folder containing `manifest.json`.
+Pilovo 0.4.0 is a Manifest V3 extension for Chrome 120+, installed manually: there is no Chrome Web Store listing or approval and no automatic update. Download `Pilovo_Chrome_v0.4.0.zip` from the [v0.4.0 prerelease](https://github.com/alebgl77/pilovo/releases/tag/v0.4.0), or [build from source](#build-from-source). Extract it, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, then select the folder containing `manifest.json`.
 
-Pilovo's core is free under MIT. No Pilovo account, API key, companion, CLI or Node.js is required to use the extension. Provider account rules, plans and quotas still apply. Node.js is only needed to build. [Detailed installation and French first-run guide](docs/installation.md).
+Provider account rules, plans and quotas still apply. No CLI or Node.js is needed to use the release ZIP; Node.js is only needed to build. [Detailed installation guide](docs/installation.md) · [Guide d'installation en français](docs/installation.fr.md).
 
 ## What Pilovo can see
 
@@ -60,7 +94,47 @@ Pilovo's core is free under MIT. No Pilovo account, API key, companion, CLI or N
 | Optional `https://chatgpt.com/*` or `https://claude.ai/*` | Recognize matching tabs, read supported status indicators and focus a tab; requested individually. |
 | Optional `notifications` (unreleased) | System notifications for the services you check in Settings, off by default; requested when you check the first service and removed when you uncheck the last. |
 
-The observer reads a limited set of DOM controls and dedicated status indicators. It does not collect full conversations, prompt or response text, tab titles, screenshots, cookies or credentials. Activity metadata stays local and ephemeral; session names you type (unreleased) stay in that memory for their tab's lifetime and are never stored or exported. Optional automatic seen (unreleased, off by default) reads only which tab is active in the focused window, as IDs and flags kept in memory. Optional system notifications (unreleased, off by default) contain only the service, the reason and the session number; your operating system may keep them in its notification center. No backend, model API, remote telemetry or cloud sync is used. Revocation invalidates access; the observer's lease has a logical cutoff of at most 15 seconds, even if Chrome delays execution of cleanup. See [Privacy](docs/privacy.md) and the [technical contract](docs/core-contract.md).
+Pilovo never requests the `tabs` permission, access to all sites or `nativeMessaging`. The observer reads a limited set of DOM controls and dedicated status indicators. It does not collect full conversations, prompt or response text, tab titles, screenshots, cookies or credentials. Activity metadata stays local and ephemeral; session names you type (unreleased) stay in that memory for their tab's lifetime and are never stored or exported. Optional automatic seen (unreleased, off by default) reads only which tab is active in the focused window, as IDs and flags kept in memory. Optional system notifications (unreleased, off by default) contain only the service, the reason and the session number; your operating system may keep them in its notification center. No backend, model API, remote telemetry or cloud sync is used. Revocation invalidates access; the observer's lease has a logical cutoff of at most 15 seconds, even if Chrome delays execution of cleanup. See [Privacy](docs/privacy.md) and the [technical contract](docs/core-contract.md).
+
+## Frequently asked questions
+
+### How do I know when ChatGPT or Claude has finished responding in another tab?
+
+Install the Pilovo Chrome extension and connect the service, then keep Chrome's side panel open or watch Pilovo's toolbar badge: when a response has finished generating, its row moves to **To review** with **Response available**, and the badge counts the items you have not marked as seen. Pilovo reports this only after observing the tab working and then a stable ready signal; **Open session** brings that tab to the front.
+
+### Does Pilovo send a notification or play a sound when ChatGPT or Claude finishes?
+
+Not in 0.4.0: the released preview of the Pilovo Chrome extension shows the side panel and the badge count, with no system notification and no sound. The current source adds optional system notifications per service, off by default (unreleased; build from source), containing only the service, the reason and the session number. Your provider may offer its own notifications, which Pilovo does not change or replace.
+
+### Does Pilovo read my conversations?
+
+No. After you grant a site, Pilovo's observer reads a limited set of page controls and dedicated status indicators there; it does not collect full conversations, prompt or response text, tab titles, screenshots, cookies or credentials. Nothing is sent to a server: Pilovo has no backend or telemetry. See [Privacy](docs/privacy.md).
+
+### Which permissions does Pilovo request?
+
+Pilovo requires exactly four permissions: `storage`, `sidePanel`, `alarms` and `scripting`. Access to `https://chatgpt.com/*` and `https://claude.ai/*` is optional and requested separately for each site; the current source adds just one optional permission, `notifications` (unreleased), requested only when you click. Pilovo never requests `tabs`, access to all sites or `nativeMessaging`; see [What Pilovo can see](#what-pilovo-can-see).
+
+### Is Pilovo on the Chrome Web Store?
+
+No. Pilovo 0.4.0 is a GitHub prerelease that you load with **Load unpacked**, without automatic updates. See the [installation guide](docs/installation.md).
+
+### Is Pilovo free? Do I need an account or an API key?
+
+Pilovo's core is free under the MIT license, and you need no Pilovo account, API key or companion app. You keep using your own ChatGPT or Claude web account, with its plans and quotas.
+
+### Does "Response available" mean my task succeeded?
+
+No. **Response available** (response ready) means generation ended as observed in the page; Pilovo does not check the answer. Review it in the service, because your task may still need work. **Seen** only records that you noticed the item.
+
+### Which browsers, apps and sites does Pilovo work with?
+
+Pilovo targets Chrome 120 or later and observes only `chatgpt.com` and `claude.ai` pages in Chrome tabs. Other browsers, including other Chromium-based browsers, are not tested or claimed; Firefox and Safari are not supported, and desktop or mobile apps and other AI websites are not observed.
+
+### Is Pilovo an official ChatGPT or Claude extension?
+
+No. Pilovo is an independent open-source project, not affiliated with, endorsed by or sponsored by the companies that operate ChatGPT or Claude; those names only identify the services Pilovo observes.
+
+More answers, including troubleshooting: [FAQ](docs/faq.md).
 
 ## Manual preparations remain separate
 
@@ -87,6 +161,6 @@ The preserved `companion/` code is a historical experiment, unbundled and unnece
 
 ## Status and contributing
 
-No store approval, production certification, coverage percentage, user count or provider affiliation is claimed. Benchmarks and broader integration goals in the [PRD](docs/activity-manager-prd.md) and [roadmap](docs/roadmap.md) are future targets.
+No store approval, production certification, coverage percentage or user count is claimed. Benchmarks and broader integration goals in the [PRD](docs/activity-manager-prd.md) (in French) and [roadmap](docs/roadmap.md) are future targets. Changes since 0.4.0 are listed in the [changelog](CHANGELOG.md).
 
 [Contribution guide](CONTRIBUTING.md) · [Support](SUPPORT.md) · [Security](SECURITY.md). Pilovo uses the [MIT license](LICENSE); third-party components retain their own licenses and notices.
