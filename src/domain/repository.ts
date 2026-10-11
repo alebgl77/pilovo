@@ -6,7 +6,8 @@ import { eventSchema, taskKey } from '../shared/protocol';
 import type { AgentEvent, BridgeStatus, Connector, Diagnostics, ExportData, Mission, Settings, Snapshot, SourceId, TabBinding, TaskRun } from '../shared/types';
 import type { EventAck } from '../shared/protocol';
 import { makeVerificationCheck, type HashEvidence } from './verification';
-import { webPreparationInputSchema, webPreparationPatchSchema, type WebPreparation, type WebPreparationInput, type WebPreparationPatch } from '../shared/web';
+import { notifyProvidersSchema, webPreparationInputSchema, webPreparationPatchSchema, type WebPreparation, type WebPreparationInput, type WebPreparationPatch } from '../shared/web';
+import { autoAcknowledgeSchema } from '../shared/activity';
 
 export const LIMITS = { tasks: 2000, missions: 250, webPreparations: 250, eventsPerTask: 250, eventsTotal: 10000, deletedRuns: 10000, staleMs: 90_000 } as const;
 type StoredEvent = AgentEvent & { id: string; taskKey: string; receivedAt: string };
@@ -22,7 +23,16 @@ interface HubDB extends DBSchema {
 }
 type WriteTx = IDBPTransaction<HubDB, ['tasks', 'missions', 'events', 'tombstones', 'meta', 'webPreparations'], 'readwrite'>;
 const stores = ['tasks', 'missions', 'events', 'tombstones', 'meta', 'webPreparations'] as const;
-const settingSchema = z.object({ language: z.enum(['fr', 'en']).optional(), theme: z.enum(['system', 'light', 'dark']).optional(), retentionDays: z.number().int().min(1).max(365).optional(), retainPrompts: z.boolean().optional(), notifications: z.literal(false).optional(), bridgeEnabled: z.boolean().optional() }).strict();
+const settingSchema = z.object({ language: z.enum(['fr', 'en']).optional(), theme: z.enum(['system', 'light', 'dark']).optional(), retentionDays: z.number().int().min(1).max(365).optional(), retainPrompts: z.boolean().optional(), notifications: z.literal(false).optional(), bridgeEnabled: z.boolean().optional(), autoAcknowledgeSeconds: autoAcknowledgeSchema.optional(), notifyProviders: notifyProvidersSchema.optional() }).strict();
+// Settings written by older versions lack newer fields (autoAcknowledgeSeconds, notifyProviders): every read merges the
+// stored value over the defaults, without a migration, and an unexpected stored value falls back to its default (off).
+function storedSettings(value: unknown): Settings {
+  const settings: Settings = { ...DEFAULT_SETTINGS, ...(value && typeof value === 'object' ? value as Partial<Settings> : {}), bridgeEnabled: false };
+  if (!autoAcknowledgeSchema.safeParse(settings.autoAcknowledgeSeconds).success) settings.autoAcknowledgeSeconds = DEFAULT_SETTINGS.autoAcknowledgeSeconds;
+  const notify = notifyProvidersSchema.safeParse(settings.notifyProviders);
+  settings.notifyProviders = notify.success ? notify.data : [];
+  return settings;
+}
 const titleSchema = z.string().trim().min(1).max(240);
 const terminal = new Set(['completed', 'failed', 'cancelled']);
 const eventExecution = { 'task.started': 'running', 'task.progress': 'running', 'task.waiting': 'waiting_input', 'task.completed': 'completed', 'task.failed': 'failed', 'task.cancelled': 'cancelled' } as const;
@@ -73,6 +83,7 @@ export class HubRepository {
   }
   private async meta<T>(tx: WriteTx, key: string, fallback: T): Promise<T> { return ((await tx.objectStore('meta').get(key))?.value as T | undefined) ?? structuredClone(fallback); }
   private async setMeta(tx: WriteTx, key: string, value: unknown) { await tx.objectStore('meta').put({ key, value }); }
+  private async settings(tx: WriteTx) { return storedSettings((await tx.objectStore('meta').get('settings'))?.value); }
   private async task(tx: WriteTx, key: string) { const task = await tx.objectStore('tasks').get(key); if (!task) throw new HubError('task.missing'); return task; }
   private async diagnostics(tx: WriteTx, kind: 'accepted' | 'duplicate' | 'rejected', code?: Diagnostics['lastError']) {
     const diagnostics = await this.meta(tx, 'diagnostics', initialDiagnostics());
@@ -104,7 +115,7 @@ export class HubRepository {
         return reject('event.order');
       }
       if (!current && await tx.objectStore('tasks').count() >= LIMITS.tasks) return reject('storage.limit');
-      const settings = await this.meta(tx, 'settings', DEFAULT_SETTINGS);
+      const settings = await this.settings(tx);
       const connections = await this.meta<Record<string, { connection: Connector['connection']; lastSeenAt: string }>>(tx, 'connections', {});
       const clean = cleanEvent(event, settings.retainPrompts);
       const now = this.date();
@@ -140,7 +151,7 @@ export class HubRepository {
       const tx = (await this.db).transaction(['tasks', 'missions', 'meta', 'webPreparations']);
       const [tasks, missions, rows, preparations] = await Promise.all([tx.objectStore('tasks').getAll(), tx.objectStore('missions').getAll(), tx.objectStore('meta').getAll(), tx.objectStore('webPreparations').getAll()]);
       const meta = Object.fromEntries(rows.map(row => [row.key, row.value]));
-      const settings = { ...((meta.settings ?? DEFAULT_SETTINGS) as Settings), bridgeEnabled: false };
+      const settings = storedSettings(meta.settings);
       return { tasks: tasks.map(task => ({ ...task, connection: 'disconnected' as const })).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)), webPreparations: preparations.map(publicPreparation).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), missions: missions.sort((a, b) => b.createdAt.localeCompare(a.createdAt)), settings, connectors: CONNECTORS.map(connector => ({ ...structuredClone(connector), connection: 'disconnected', capabilities: { ...connector.capabilities, automaticDiscovery: false, launch: false } })), diagnostics: (meta.diagnostics ?? initialDiagnostics()) as Diagnostics, bridgeStatus: 'disabled', mode };
     } catch { throw new HubError('storage.failed'); }
   }
@@ -222,8 +233,7 @@ export class HubRepository {
   async updateSettings(patch: Partial<Settings>): Promise<Settings> {
     const valid = validate(settingSchema, patch);
     const result = await this.write(async tx => {
-      const previous = await this.meta(tx, 'settings', DEFAULT_SETTINGS);
-      const settings = { ...previous, ...valid, bridgeEnabled: false };
+      const settings: Settings = { ...await this.settings(tx), ...valid, bridgeEnabled: false };
       if (valid.retainPrompts === false) {
         let taskCursor = await tx.objectStore('tasks').openCursor();
         while (taskCursor) { const task = taskCursor.value; if ('prompt' in task) { delete task.prompt; await taskCursor.update(task); } taskCursor = await taskCursor.continue(); }
@@ -269,12 +279,12 @@ export class HubRepository {
     try {
       const tx = (await this.db).transaction(['tasks', 'missions', 'events', 'meta', 'webPreparations']);
       const [tasks, missions, events, settingsRow, preparations] = await Promise.all([tx.objectStore('tasks').getAll(), tx.objectStore('missions').getAll(), tx.objectStore('events').getAll(), tx.objectStore('meta').get('settings'), tx.objectStore('webPreparations').getAll()]);
-      const settings = { ...((settingsRow?.value ?? DEFAULT_SETTINGS) as Settings), bridgeEnabled: false };
+      const settings = storedSettings(settingsRow?.value);
       return { schemaVersion: 2, exportedAt: this.date(), settings, missions, webPreparations: preparations.map(publicPreparation), tasks: tasks.map(task => { const copy = structuredClone(task); delete copy.tabBinding; if (!settings.retainPrompts) delete copy.prompt; return copy; }), events: events.map(event => cleanEvent(unstore(event), settings.retainPrompts)) };
     } catch { throw new HubError('storage.failed'); }
   }
   async cleanup() {
-    return this.write(async tx => { const settings = await this.meta(tx, 'settings', DEFAULT_SETTINGS); const before = new Date(this.now() - settings.retentionDays * 86400_000).toISOString(); for (const key of await tx.objectStore('tasks').index('by-received').getAllKeys(IDBKeyRange.upperBound(before, true))) await this.removeTask(tx, key); for (const id of await tx.objectStore('webPreparations').index('by-updated').getAllKeys(IDBKeyRange.upperBound(before, true))) await this.removeWebPreparation(tx, id); });
+    return this.write(async tx => { const settings = await this.settings(tx); const before = new Date(this.now() - settings.retentionDays * 86400_000).toISOString(); for (const key of await tx.objectStore('tasks').index('by-received').getAllKeys(IDBKeyRange.upperBound(before, true))) await this.removeTask(tx, key); for (const id of await tx.objectStore('webPreparations').index('by-updated').getAllKeys(IDBKeyRange.upperBound(before, true))) await this.removeWebPreparation(tx, id); });
   }
   async setConnection(sourceId: SourceId, connection: 'online' | 'disconnected') {
     return this.write(async tx => { const connections = await this.meta<Record<string, { connection: Connector['connection']; lastSeenAt: string }>>(tx, 'connections', {}); const changed = connections[sourceId]?.connection !== connection; connections[sourceId] = { connection, lastSeenAt: this.date() }; await this.setMeta(tx, 'connections', connections); if (changed) for (const task of await tx.objectStore('tasks').index('by-source').getAll(sourceId)) if (task.connection !== connection) { task.connection = connection; await tx.objectStore('tasks').put(task); } });

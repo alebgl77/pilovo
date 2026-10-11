@@ -9,10 +9,10 @@ import { allowedSource, crc32, publishDirectory, scanText, validateChromeFiles, 
 
 const metadata = { name: 'pilovo', version: '0.4.0' };
 const lock = { ...metadata, packages: { '': metadata } };
-const manifest = { manifest_version: 3, version: metadata.version, background: { service_worker: 'background.js' }, permissions: ['storage', 'sidePanel', 'alarms', 'scripting'], optional_host_permissions: ['https://claude.ai/*', 'https://chatgpt.com/*'], content_security_policy: { extension_pages: "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" } };
-test('manifest accepts exact contract and rejects drift, extra capabilities and malformed versions', () => {
+const manifest = { manifest_version: 3, version: metadata.version, background: { service_worker: 'background.js' }, permissions: ['storage', 'sidePanel', 'alarms', 'scripting'], optional_host_permissions: ['https://claude.ai/*', 'https://chatgpt.com/*'], optional_permissions: ['notifications'], content_security_policy: { extension_pages: "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" } };
+test('manifest accepts exact contract, including the single optional notifications permission, and rejects drift, extra capabilities and malformed versions', () => {
   validateManifest(manifest, metadata, lock);
-  for (const change of [{ version: '0.2.0' }, { permissions: [...manifest.permissions, 'tabs'] }, { permissions: ['storage', 'sidePanel', 'alarms'] }, { optional_host_permissions: ['https://*/*'] }, { optional_host_permissions: [...manifest.optional_host_permissions, 'https://example.com/*'] }, { host_permissions: ['<all_urls>'] }, { optional_permissions: ['scripting'] }, { content_scripts: [] }, { externally_connectable: {} }, { content_security_policy: { extension_pages: "script-src 'self' https://example.com; object-src 'none'" } }]) assert.throws(() => validateManifest({ ...manifest, ...change }, metadata, lock));
+  for (const change of [{ version: '0.2.0' }, { permissions: [...manifest.permissions, 'tabs'] }, { permissions: ['storage', 'sidePanel', 'alarms'] }, { optional_host_permissions: ['https://*/*'] }, { optional_host_permissions: [...manifest.optional_host_permissions, 'https://example.com/*'] }, { host_permissions: ['<all_urls>'] }, { optional_permissions: ['scripting'] }, { optional_permissions: ['notifications', 'tabs'] }, { optional_permissions: ['notifications', 'notifications'] }, { optional_permissions: [] }, { optional_permissions: undefined }, { optional_permissions: 'notifications' }, { permissions: [...manifest.permissions, 'notifications'] }, { content_scripts: [] }, { externally_connectable: {} }, { content_security_policy: { extension_pages: "script-src 'self' https://example.com; object-src 'none'" } }]) assert.throws(() => validateManifest({ ...manifest, ...change }, metadata, lock));
   assert.throws(() => validateManifest(manifest, { ...metadata, version: '../escape' }, lock));
   assert.throws(() => validateManifest(manifest, metadata, { ...lock, version: '0.2.0' }));
 });
@@ -35,6 +35,11 @@ test('secret checks redact values and recognize personal paths in public docs', 
   assert.equal(JSON.stringify(findings).includes(token), false);
   assert.deepEqual(scanText('scripts/check.mjs', personalPath).map(item => item.kind), ['personal-absolute-path']);
   assert.deepEqual(scanText('src/test.ts', 'a harmless string'), []);
+});
+test('source checks refuse raw bidi controls but accept them written as escapes', () => {
+  for (const point of [0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069]) assert.deepEqual(scanText('src/shared/activity.ts', `const unsafe = /[${String.fromCodePoint(point)}]/u;`).map(item => item.kind), ['hidden-bidi-control'], point.toString(16));
+  assert.deepEqual(scanText('src/shared/activity.ts', ['const unsafe = /[', 'u202A-', 'u202E', 'u2066-', 'u2069]/u;'].join(String.fromCharCode(92))), []);
+  assert.deepEqual(scanText('docs/README.fr.md', 'Revue contrat — Claude · « Onglet 4 »'), []);
 });
 test('tracked scan rejects a force-added forbidden file even though source packaging excludes it', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'briefoak-tracked-'));

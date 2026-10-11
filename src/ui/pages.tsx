@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowUpRight, Check, Clock3, Download, ExternalLink, FileCheck2, FileText, Hash, Link2, LockKeyhole, ShieldQuestion, Trash2 } from 'lucide-react';
 import type { AgentEvent, HubClient, Settings, Snapshot, TaskRun } from '../shared/types';
 import { safeHttpUrl } from '../shared/protocol';
+import { AUTO_ACKNOWLEDGE_SECONDS } from '../shared/activity';
+import { WEB_PROVIDERS, type WebProvider } from '../shared/web';
 import { Notice, SourceLabel, Status, type ActionRunner, type DialogRequest } from './components';
-import { errorMessage, formatDate, translator, type MessageKey } from './i18n';
+import { errorMessage, formatDate, translator, type MessageKey, type Translate } from './i18n';
 import { formatDuration, observedDuration } from './model';
 
 interface PageProps { snapshot: Snapshot; api: HubClient; run: ActionRunner; busy: boolean }
@@ -52,9 +54,61 @@ export function SettingsPage({ snapshot, api, run, busy, openDialog }: PageProps
   const change = (patch: Partial<Settings>) => { void run(() => api.updateSettings(patch), 'settingsSaved'); };
   const exportData = () => { void run(async () => { const data = await api.exportData(); const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `pilovo-export-${new Date().toISOString().slice(0, 10)}.json`; try { document.body.append(link); link.click(); } finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); } }, 'exported'); };
   return <div className="page-scroll"><div className="settings-content"><section className="settings-section"><h2>{t('appearance')}</h2><div className="setting-row"><label htmlFor="setting-language">{t('language')}</label><select id="setting-language" value={settings.language} disabled={busy} onChange={event => change({ language: event.target.value as Settings['language'] })}><option value="fr">Français</option><option value="en">English</option></select></div><div className="setting-row"><label htmlFor="setting-theme">{t('theme')}</label><select id="setting-theme" value={settings.theme} disabled={busy} onChange={event => change({ theme: event.target.value as Settings['theme'] })}><option value="system">{t('system')}</option><option value="light">{t('light')}</option><option value="dark">{t('dark')}</option></select></div></section>
+    <section className="settings-section"><h2>{t('activity')}</h2><div className="setting-row"><div><label htmlFor="setting-auto-seen">{t('autoSeen')}</label><p id="auto-seen-help">{t('autoSeenHelp')}</p></div><select id="setting-auto-seen" aria-describedby="auto-seen-help" value={settings.autoAcknowledgeSeconds} disabled={busy} onChange={event => change({ autoAcknowledgeSeconds: Number(event.target.value) as Settings['autoAcknowledgeSeconds'] })}>{AUTO_ACKNOWLEDGE_SECONDS.map(seconds => <option key={seconds} value={seconds}>{seconds ? `${seconds}\u00a0s` : t('autoSeenOff')}</option>)}</select></div><NotificationSetting settings={settings} api={api} run={run} busy={busy} t={t} /></section>
     <section className="settings-section"><h2>{t('privacy')}</h2><div className="setting-row"><div><label htmlFor="setting-retention">{t('retention')}</label><p id="retention-help">{t('retentionHelp')}</p></div><select id="setting-retention" aria-describedby="retention-help" value={settings.retentionDays} disabled={busy} onChange={event => change({ retentionDays: Number(event.target.value) })}>{[7, 30, 90, 365].map(days => <option key={days} value={days}>{days} {t('days')}</option>)}</select></div><label className="setting-row toggle-row"><div><strong>{t('retainPrompts')}</strong><p>{t('retainPromptsHelp')}</p></div><input type="checkbox" role="switch" checked={settings.retainPrompts} disabled={busy} onChange={event => change({ retainPrompts: event.target.checked })} /></label><div className="privacy-summary"><LockKeyhole size={17} aria-hidden="true" /><p>{t('localOnlyText')}</p></div></section>
     <section className="settings-section"><h2>{t('portability')}</h2><p className="muted small">{t('exportHelp')}</p><button className="button" disabled={busy} onClick={exportData}><Download size={16} />{t('export')}</button><div className="delete-data"><p className="muted small">{t('purgeText')}</p><button className="button danger-outline" onClick={() => openDialog({ title: t('purgeTitle'), description: t('purgeText'), kind: 'confirm', submitLabel: t('purge'), danger: true, success: 'purged', onSubmit: () => api.purgeAll() })}><Trash2 size={16} />{t('purge')}</button></div></section>
     <section className="settings-section"><h2>{t('permissions')}</h2><p className="muted small">{t('permissionsHelp')}</p></section>
     <section className="settings-section"><h2>{t('diagnostics')}</h2><p className="muted small">{t('diagnosticsHelp')}</p><dl className="metadata diagnostics"><div><dt>{t('acceptedEvents')}</dt><dd>{snapshot.diagnostics.acceptedEvents}</dd></div><div><dt>{t('duplicates')}</dt><dd>{snapshot.diagnostics.duplicateEvents}</dd></div><div><dt>{t('rejectedEvents')}</dt><dd>{snapshot.diagnostics.rejectedEvents}</dd></div><div><dt>{t('lastError')}</dt><dd>{snapshot.diagnostics.lastError ? <>{errorMessage({ code: snapshot.diagnostics.lastError }, settings.language)}{snapshot.diagnostics.lastErrorAt && <small>{formatDate(snapshot.diagnostics.lastErrorAt, settings.language)}</small>}</> : t('noError')}</dd></div></dl></section>
   </div></div>;
+}
+
+// Optional OS notifications, per service. Chrome's optional notifications permission is requested from the checkbox's own
+// change event (a user gesture) and removed with the last service; a service is shown as notifying only while the setting
+// lists it and Chrome still grants the permission, so a permission removed in Chrome's settings reads as off here.
+type NotifyPermission = 'loading' | 'granted' | 'missing' | 'error';
+function NotificationSetting({ settings, api, run, busy, t }: { settings: Settings; api: HubClient; run: ActionRunner; busy: boolean; t: Translate }) {
+  const supported = Boolean(api.hasNotificationPermission && api.requestNotificationPermission && api.removeNotificationPermission);
+  const [permission, setPermission] = useState<NotifyPermission>('loading');
+  const [refused, setRefused] = useState(false);
+  const mounted = useRef(false), reads = useRef(0);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; reads.current++; }; }, []);
+  const read = useCallback(() => {
+    if (!api.hasNotificationPermission) return;
+    const pass = ++reads.current;
+    // Once Chrome grants it (here or elsewhere), an earlier refusal no longer applies.
+    void api.hasNotificationPermission().then(granted => granted ? 'granted' as const : 'missing' as const, () => 'error' as const).then(value => { if (mounted.current && pass === reads.current) { setPermission(value); if (value === 'granted') setRefused(false); } });
+  }, [api]);
+  // Every snapshot re-reads it: a permission change, even in Chrome's settings, makes the worker refresh open panels.
+  useEffect(() => { read(); }, [read, settings]);
+  const enabled = supported && permission === 'granted' ? settings.notifyProviders : [];
+  const toggle = (provider: WebProvider, checked: boolean) => {
+    // While a change runs, the boxes are aria-disabled rather than disabled, so the one just toggled keeps keyboard focus.
+    if (busy) return;
+    const next = WEB_PROVIDERS.map(item => item.id).filter(id => id === provider ? checked : enabled.includes(id));
+    setRefused(false);
+    if (checked && permission !== 'granted') {
+      let granted = false;
+      // run() calls this action before any await, within this change event, so Chrome sees the user gesture; it also clears
+      // the previous action's status. A request that fails counts as a refusal.
+      void run(async () => { try { granted = await api.requestNotificationPermission!(); } catch { /* A refusal. */ } }).then(async ran => {
+        if (!ran || !mounted.current) return;
+        read();
+        if (!granted) { setRefused(true); return; }
+        await run(() => api.updateSettings({ notifyProviders: next }), 'settingsSaved');
+      });
+      return;
+    }
+    // With the last service unchecked the permission goes too, best effort: the setting is already off, and the worker
+    // replies only once it has cleared its notifications, which Chrome refuses after the removal.
+    void run(async () => { await api.updateSettings({ notifyProviders: next }); if (!next.length) await api.removeNotificationPermission!().catch(() => false); }, 'settingsSaved').then(() => { if (mounted.current) read(); });
+  };
+  const state = !supported ? t('notifyUnavailable') : permission === 'error' ? t('notifyUnknown') : permission === 'missing' && settings.notifyProviders.length ? t('notifyRemoved') : undefined;
+  const disabled = !supported || permission === 'loading' || permission === 'error';
+  return <fieldset className="notify-setting" aria-describedby={state ? 'notify-help notify-state' : 'notify-help'}>
+    <legend>{t('notifySystem')}</legend>
+    <p id="notify-help">{t('notifyHelp')}</p>
+    <div className="notify-options">{WEB_PROVIDERS.map(provider => <label key={provider.id} className="checkbox-label"><input type="checkbox" checked={enabled.includes(provider.id)} disabled={disabled} aria-disabled={!disabled && busy || undefined} onChange={event => toggle(provider.id, event.target.checked)} />{provider.name}</label>)}</div>
+    {state && <p id="notify-state" className="notify-state">{state}</p>}
+    {refused && <p className="field-error" role="alert">{t('notifyRefused')}</p>}
+  </fieldset>;
 }

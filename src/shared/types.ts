@@ -1,7 +1,7 @@
 import type { BrowserActivity, ControlRequest, ControlResponse } from './launch';
 import type { AgentDetection } from './discovery';
 import type { WebDiscovery, WebPreparation, WebPreparationInput, WebPreparationPatch, WebProvider } from './web';
-import type { ActivityShortcuts, WebActivitySnapshot } from './activity';
+import type { ActivityShortcuts, AutoAcknowledgeSeconds, WebActivitySnapshot } from './activity';
 export type SourceId = 'claude-code' | 'codex';
 export type Execution = 'running' | 'waiting_input' | 'paused' | 'completed' | 'failed' | 'cancelled';
 export type Connection = 'online' | 'stale' | 'disconnected';
@@ -32,7 +32,10 @@ export interface TaskRun {
   associationHistory: { from?: string; to?: string; at: string }[];
   verificationChecks: VerificationCheck[];
 }
-export interface Settings { language: 'fr' | 'en'; theme: 'system' | 'light' | 'dark'; retentionDays: number; retainPrompts: boolean; notifications: boolean; bridgeEnabled: boolean }
+// autoAcknowledgeSeconds: optional automatic seen after dwelling on the tab, 0 (off) by default; older stored settings lack it.
+// notifyProviders: services with optional OS notifications, [] (off) by default; older stored settings lack it. The legacy
+// notifications flag belongs to the historical native agents and stays false.
+export interface Settings { language: 'fr' | 'en'; theme: 'system' | 'light' | 'dark'; retentionDays: number; retainPrompts: boolean; notifications: boolean; bridgeEnabled: boolean; autoAcknowledgeSeconds: AutoAcknowledgeSeconds; notifyProviders: WebProvider[] }
 export interface Connector {
   id: SourceId; name: string; connection: Connection; maturity: 'proof-of-concept'; protocolVersion: 1;
   adapterVersion: string; testedVersion: string | null; lastVerifiedAt: string | null; lastSeenAt?: string;
@@ -50,10 +53,16 @@ export interface HubClient {
   focusWebActivity?(id: string): Promise<void>;
   acknowledgeWebActivity?(id: string, attentionId: string): Promise<void>;
   acknowledgeAllWebActivity?(attentionIds?: string[]): Promise<number>;
+  labelWebActivity?(id: string, label: string | null): Promise<void>;
+  getCurrentWindowId?(): Promise<number | undefined>;
   getShortcuts?(): Promise<ActivityShortcuts>;
   getWebDiscovery?(): Promise<WebDiscovery>;
   requestWebDiscoveryPermission?(provider?: WebProvider): Promise<boolean>;
   removeWebDiscoveryPermission?(provider?: WebProvider): Promise<boolean>;
+  // Optional OS notifications: Chrome's optional notifications permission, read and changed from the UI only.
+  hasNotificationPermission?(): Promise<boolean>;
+  requestNotificationPermission?(): Promise<boolean>;
+  removeNotificationPermission?(): Promise<boolean>;
   createWebPreparation?(input: WebPreparationInput): Promise<WebPreparation>;
   updateWebPreparation?(id: string, patch: WebPreparationPatch): Promise<WebPreparation>;
   deleteWebPreparation?(id: string): Promise<void>;

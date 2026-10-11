@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WebActivity, type ActivityAccess } from '../../src/background/activity';
+import { WebActivity, type ActivityAccess, type ActivityView } from '../../src/background/activity';
 import { makeUnknown, newActivityRecord, reduceActivity } from '../../src/background/activity-reducer';
+import { BADGE_COLORS, BADGE_TEXT_COLOR } from '../../src/background/activity-badge';
+import { NOTICE_GRACE, NOTICE_LIMIT, NOTICE_RESAMPLE, NOTIFIED_LIMIT, noticeId, parseNoticeId, remember, type ActivityNotice } from '../../src/background/activity-notifications';
 import { activityHintSchema, activitySampleSchema, ACTIVITY_TTL, type ActivityEvidence, type ActivityLease } from '../../src/shared/activity';
+import type { WebTab } from '../../src/platform/web';
 
 describe('conservative activity reducer', () => {
   it('requires witnessed work and two uninterrupted positive reads one second apart', () => {
@@ -42,6 +45,40 @@ describe('conservative activity reducer', () => {
     expect(record.observation.attention).toMatchObject({ reason: 'response_ready', raisedAt: 4100 });
     reduceActivity(record, 'idle_ready', 9000, 6, 24000); expect(record.observation.attention!.raisedAt).toBe(4100);
   });
+  it('times the displayed state with stateSince: kept across same-state samples and the ready debounce, reset on change', () => {
+    const record = newActivityRecord('chatgpt-web', 1, 2, 'session', 50, 99_000);
+    expect(record.observation).toMatchObject({ state: 'unknown', stateSince: 50 });
+    reduceActivity(record, 'unknown', 80, 1, 15080); expect(record.observation).toMatchObject({ state: 'unknown', stateSince: 50, validUntil: 15080 });
+    reduceActivity(record, 'idle_ready', 100, 1, 15100); expect(record.observation).toMatchObject({ state: 'idle', stateSince: 100 });
+    reduceActivity(record, 'idle_ready', 600, 2, 15600); expect(record.observation.stateSince).toBe(100);
+    reduceActivity(record, 'working', 1000, 3, 16000); expect(record.observation).toMatchObject({ state: 'working', stateSince: 1000 });
+    reduceActivity(record, 'working', 4000, 4, 19000); expect(record.observation.stateSince).toBe(1000);
+    // While the 1 s ready debounce runs the state stays working, so its duration must not restart.
+    reduceActivity(record, 'idle_ready', 5000, 5, 20000); reduceActivity(record, 'idle_ready', 5999, 6, 20999);
+    expect(record.observation).toMatchObject({ state: 'working', stateSince: 1000 });
+    reduceActivity(record, 'idle_ready', 6000, 7, 21000);
+    expect(record.observation).toMatchObject({ state: 'attention', stateSince: 6000, attention: { reason: 'response_ready', raisedAt: 6000 } });
+    record.observation.attention!.acknowledged = true; reduceActivity(record, 'idle_ready', 9000, 8, 24000);
+    expect(record.observation).toMatchObject({ stateSince: 6000, attention: { acknowledged: true, raisedAt: 6000 } });
+    // A new attention identity resets both, even though the state stays attention.
+    reduceActivity(record, 'input_required', 9500, 9, 24500); reduceActivity(record, 'input_required', 9900, 9, 24900);
+    expect(record.observation).toMatchObject({ stateSince: 9500, attention: { reason: 'input_required', raisedAt: 9500 } });
+    reduceActivity(record, 'error_visible', 10_000, 10, 25000);
+    expect(record.observation).toMatchObject({ stateSince: 10_000, attention: { reason: 'error_visible', raisedAt: 10_000 } });
+    reduceActivity(record, 'idle_ready', 11_000, 11, 26000); expect(record.observation).toMatchObject({ state: 'idle', stateSince: 11_000 });
+    // Unknown evidence restarts the state at the sample time, not at the lease deadline it keeps as validUntil.
+    reduceActivity(record, 'working', 12_000, 12, 27000); reduceActivity(record, 'unknown', 13_000, 13, 28000);
+    expect(record.observation).toMatchObject({ state: 'unknown', stateSince: 13_000, validUntil: 28000 });
+    reduceActivity(record, 'working', 14_000, 14, 29000); expect(record.observation).toMatchObject({ state: 'working', stateSince: 14_000 });
+  });
+  it('makeUnknown restarts stateSince from any other state and keeps it while already unknown', () => {
+    const record = newActivityRecord('claude-web', 1, 2, 'session', 0, 0);
+    reduceActivity(record, 'input_required', 500, 0, 15500); expect(record.observation.stateSince).toBe(record.observation.attention!.raisedAt);
+    makeUnknown(record, 'unavailable', 2000); expect(record.observation).toMatchObject({ state: 'unknown', stateSince: 2000, validUntil: 2000, unknownReason: 'unavailable' });
+    makeUnknown(record, 'expired', 3000); expect(record.observation).toMatchObject({ stateSince: 2000, unknownReason: 'expired' });
+    reduceActivity(record, 'working', 4000, 0, 19000); makeUnknown(record, 'navigation', 5000);
+    expect(record.observation).toMatchObject({ state: 'unknown', stateSince: 5000, unknownReason: 'navigation' }); expect(record.observation.attention).toBeUndefined();
+  });
 });
 
 let access: ActivityAccess, activity: WebActivity, now: number, evidence: ActivityEvidence, documentId: string, activationId: string;
@@ -50,6 +87,7 @@ const hint = (sequence = 1) => ({ channel: 'pilovo.observe', version: 1, activat
 const sender = () => ({ id: 'extension', frameId: 0, documentId, documentLifecycle: 'active', url: currentTab().url, tab: currentTab() });
 const tick = async (ms = 0) => { now += ms; await vi.advanceTimersByTimeAsync(ms); };
 const row = () => activity.snapshot().observations[0];
+const painted = () => vi.mocked(access.badge).mock.lastCall?.[0];
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; };
 beforeEach(() => {
   vi.useFakeTimers(); now = 1_000_000; evidence = 'working'; documentId = 'chrome-document'; activationId = crypto.randomUUID();
@@ -59,6 +97,8 @@ beforeEach(() => {
     register: vi.fn(async () => undefined), unregister: vi.fn(async () => undefined), install: vi.fn(async () => undefined), dispose: vi.fn(async () => undefined),
     sample: vi.fn(async (_tab, lease) => [{ frameId: 0, documentId, result: { version: 1, requestId: lease.requestId, activationId, evidence } }]),
     focus: vi.fn(async (_provider, _tabId, current) => { if (!current()) throw new Error('expired'); }), badge: vi.fn(async () => undefined), notify: vi.fn(),
+    viewing: vi.fn(async () => undefined),
+    canNotify: vi.fn(async () => false), showNotification: vi.fn(async () => undefined), clearNotification: vi.fn(async () => undefined), shownNotifications: vi.fn(async () => []),
   };
   activity = new WebActivity(access);
 });
@@ -70,14 +110,49 @@ describe('leased worker observations', () => {
     evidence = 'idle_ready'; await activity.hint(hint(), sender()); await tick(1000); expect(row().state).toBe('working');
     await tick(1000); expect(row().state).toBe('attention');
     const observed = row(); activity.acknowledge(observed.id, observed.attention!.id); await tick();
-    expect(row().attention!.acknowledged).toBe(true); expect(access.badge).toHaveBeenLastCalledWith('');
+    expect(row().attention!.acknowledged).toBe(true); expect(painted()).toMatchObject({ text: '', title: 'Pilovo' });
     await activity.hint(hint(2), sender()); await tick(1000); expect(row().attention!.id).toBe(observed.attention!.id);
     const focusing = activity.focus(observed.id); await tick(1000); await focusing; expect(access.focus).toHaveBeenCalledOnce();
     expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|title|prompt|responseText|documentId|activationId/);
   });
+  it('carries an ephemeral stateSince that persists through same-state samples and restarts when evidence is lost', async () => {
+    const started = now; activity.start(); await tick(); expect(row()).toMatchObject({ state: 'working', stateSince: started });
+    for (let step = 2; step < 6; step++) { await activity.hint(hint(step), sender()); await tick(1000); }
+    expect(row()).toMatchObject({ state: 'working', stateSince: started }); expect(access.sample).toHaveBeenCalledTimes(5);
+    // The ready debounce keeps working and its start; the response-ready identity starts when it is raised.
+    evidence = 'idle_ready'; await activity.hint(hint(6), sender()); await tick(1000); expect(row()).toMatchObject({ state: 'working', stateSince: started });
+    await tick(1000); const raised = row(); expect(raised.state).toBe('attention'); expect(raised.stateSince).toBe(raised.attention!.raisedAt); expect(raised.stateSince).toBeGreaterThan(started);
+    activity.acknowledge(raised.id, raised.attention!.id); await activity.hint(hint(7), sender()); await tick(1000);
+    expect(row()).toMatchObject({ stateSince: raised.stateSince, attention: { acknowledged: true } });
+    // Expiry, then fresh evidence: a new record, so the duration restarts instead of spanning the gap.
+    now += ACTIVITY_TTL; expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
+    evidence = 'working'; await activity.hint(hint(8), sender()); await tick(1000);
+    const resumed = row(); expect(resumed.id).not.toBe(raised.id); expect(resumed).toMatchObject({ state: 'working', stateSince: now });
+    // Navigation and a worker restart restart it too.
+    await tick(5000); activity.updateTab(1, { status: 'loading' }, { ...currentTab(), status: 'loading' }); expect(row()).toMatchObject({ state: 'unknown', stateSince: now });
+    activity.updateTab(1, { status: 'complete' }, currentTab()); await tick(1000); expect(row()).toMatchObject({ state: 'working', stateSince: now });
+    await tick(3000); activity = new WebActivity(access); activity.start(); await tick(); expect(row()).toMatchObject({ state: 'working', stateSince: now });
+    // Bounded, non-content metadata: one number on the monotonic clock.
+    expect(Object.keys(row()).sort()).toEqual(['id', 'observedAt', 'provenance', 'provider', 'sessionNumber', 'state', 'stateSince', 'tabId', 'validUntil', 'windowId']);
+  });
   it('expires strictly using monotonic epoch even if wall clock moves backwards', async () => {
     activity.start(); await tick(); now += ACTIVITY_TTL; expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
     await expect(activity.focus(row().id)).rejects.toMatchObject({ code: 'navigation.expired' });
+  });
+  it.each([['working', '…', 'Pilovo — 1 en cours'], ['input_required', '1', 'Pilovo — 1 à vérifier (intervention demandée)']] as const)('clears a %s badge at expiry by the watchdog alone, on a fractional clock', async (value, text, title) => {
+    // The real clock is fractional and setTimeout truncates its delay, so a watchdog armed on the exact remaining time can
+    // run a fraction of a millisecond before validUntil. Here the clock follows the fake timers and each sample takes 0.4 ms.
+    const start = Date.now(); let latency = 0.5;
+    access.now = () => 1_000_000 + (Date.now() - start) + latency;
+    const reply = vi.mocked(access.sample).getMockImplementation()!;
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => { latency += 0.4; return reply(tabId, lease); });
+    evidence = value; activity.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(painted()).toMatchObject({ text, title });
+    const { validUntil } = row(); expect(validUntil - access.now()).toBeCloseTo(ACTIVITY_TTL - 0.4, 6);
+    // No snapshot, hint, acknowledgement or alarm: only the timers run, to just past validUntil.
+    await vi.advanceTimersByTimeAsync(Math.ceil(validUntil - access.now()) + 1);
+    expect(painted()).toMatchObject({ text: '', title: 'Pilovo' });
+    expect((activity as unknown as { records: Map<number, { observation: { state: string; unknownReason?: string } }> }).records.get(1)!.observation).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
   });
   it('invalidates same-URL reloads, SPA routes, frozen/discarded tabs and removes closed tabs', async () => {
     activity.start(); await tick(); const oldId = row().id;
@@ -91,7 +166,7 @@ describe('leased worker observations', () => {
     activity.start(); await tick(); const old = row().id;
     activationId = crypto.randomUUID(); evidence = 'idle_ready'; await activity.hint(hint(), sender()); await tick(1000);
     expect(row().state).toBe('idle'); expect(row().id).not.toBe(old);
-    activity = new WebActivity(access); expect(activity.snapshot().observations).toEqual([]); await tick(); expect(access.badge).toHaveBeenLastCalledWith('');
+    activity = new WebActivity(access); expect(activity.snapshot().observations).toEqual([]); await tick(); expect(painted()).toMatchObject({ text: '', title: 'Pilovo' });
     activity.start(); await tick(); expect(row().state).toBe('idle');
   });
   it('clears a revoked grant immediately and rejects a sample released after rapid regrant', async () => {
@@ -167,12 +242,66 @@ describe('leased worker observations', () => {
     const focusing = expect(activity.focus(oldId)).rejects.toMatchObject({ code: 'navigation.changed' }); await tick(1000); await focusing;
     expect(access.sample).toHaveBeenCalledTimes(2); expect(access.focus).not.toHaveBeenCalled();
   });
-  it('focus never joins a preexisting in-flight sample as proof', async () => {
+  it('focus never joins a preexisting in-flight sample as proof: it waits for it, then takes its own', async () => {
     activity.start(); await tick(); const oldId = row().id;
     const slow = deferred<Awaited<ReturnType<ActivityAccess['sample']>>>(); vi.mocked(access.sample).mockReturnValueOnce(slow.promise);
     await activity.hint(hint(), sender()); await tick(1000);
-    await expect(activity.focus(oldId)).rejects.toMatchObject({ code: 'navigation.changed' }); expect(access.focus).not.toHaveBeenCalled();
-    slow.resolve([]); await tick();
+    const calls = vi.mocked(access.sample).mock.calls.length;
+    let settled = false; const focusing = activity.focus(oldId).finally(() => { settled = true; });
+    await tick(1500); expect(settled).toBe(false); expect(access.focus).not.toHaveBeenCalled();
+    slow.resolve([{ frameId: 0, documentId, result: { version: 1, requestId: vi.mocked(access.sample).mock.calls[calls - 1][1].requestId, activationId, evidence } }]);
+    await tick(1000); await focusing;
+    expect(access.focus).toHaveBeenCalledOnce();
+    // The proof is a later sample with its own lease, never the one that was in flight.
+    const proof = vi.mocked(access.sample).mock.calls.at(-1)![1];
+    expect(vi.mocked(access.sample).mock.calls.length).toBeGreaterThan(calls);
+    expect(proof.requestId).not.toBe(vi.mocked(access.sample).mock.calls[calls - 1][1].requestId);
+  });
+  it('focus fails without activating when the in-flight sample it waited for invalidates the row', async () => {
+    activity.start(); await tick(); const oldId = row().id;
+    const slow = deferred<Awaited<ReturnType<ActivityAccess['sample']>>>(); vi.mocked(access.sample).mockReturnValueOnce(slow.promise);
+    await activity.hint(hint(), sender()); await tick(1000);
+    const focusing = expect(activity.focus(oldId)).rejects.toMatchObject({ code: 'navigation.changed' });
+    slow.resolve([{ frameId: 0, documentId, result: { version: 1, requestId: crypto.randomUUID(), activationId, evidence } }]);
+    await tick(1000); await focusing; expect(access.focus).not.toHaveBeenCalled();
+    // The invalid in-flight result downgraded the row, so the old identity can no longer authorize activation.
+    await expect(activity.focus(oldId)).rejects.toMatchObject({ code: 'navigation.expired' }); expect(access.focus).not.toHaveBeenCalled();
+  });
+  it('routine hints arriving while focus waits for the rate bound cannot take its sample slot', async () => {
+    // Real conditions: fractional monotonic time and executeScript latency. A hint's truncated delay used to arm a
+    // routine sample about 1 ms before focus woke, still in flight when focus checked the slot (navigation.changed).
+    const reply = vi.mocked(access.sample).getMockImplementation()!;
+    vi.mocked(access.sample).mockImplementation(async (tab, lease) => { await new Promise(resolve => setTimeout(resolve, 20)); return reply(tab, lease); });
+    activity.start(); await tick(100); const oldId = row().id; const before = vi.mocked(access.sample).mock.calls.length;
+    const focusing = activity.focus(oldId);
+    for (let i = 0; i < 4; i++) { now += 0.5; await activity.hint(hint(i + 1), sender()); await tick(200); }
+    await tick(300); await focusing;
+    expect(access.focus).toHaveBeenCalledOnce();
+    expect(vi.mocked(access.sample).mock.calls.length).toBe(before + 1);
+    // Focus's own fresh sample served the hints it held back; routine scheduling then resumes normally.
+    await tick(2000); expect(vi.mocked(access.sample).mock.calls.length).toBe(before + 1);
+    await activity.hint(hint(9), sender()); await tick(1100); expect(vi.mocked(access.sample).mock.calls.length).toBe(before + 2);
+  });
+  it('after awaiting an in-flight sample, focus still respects the per-tab rate bound before its own sample', async () => {
+    activity.start(); await tick(); const oldId = row().id;
+    const slow = deferred<Awaited<ReturnType<ActivityAccess['sample']>>>(); vi.mocked(access.sample).mockReturnValueOnce(slow.promise);
+    await activity.hint(hint(), sender()); await tick(1000);
+    const started = now, calls = vi.mocked(access.sample).mock.calls.length, inFlight = vi.mocked(access.sample).mock.calls.at(-1)![1];
+    const focusing = activity.focus(oldId);
+    await tick(50); slow.resolve([{ frameId: 0, documentId, result: { version: 1, requestId: inFlight.requestId, activationId, evidence } }]);
+    // Let focus resume at this instant so the harness clock and timers agree when it computes its wait.
+    await tick(0); await tick(100); expect(vi.mocked(access.sample).mock.calls.length).toBe(calls);
+    await tick(started + 990 - now); expect(vi.mocked(access.sample).mock.calls.length).toBe(calls); expect(access.focus).not.toHaveBeenCalled();
+    await tick(20); await focusing;
+    expect(vi.mocked(access.sample).mock.calls.length).toBe(calls + 1); expect(access.focus).toHaveBeenCalledOnce();
+  });
+  it('closing the tab while focus waits rejects focus and starts no further sample', async () => {
+    activity.start(); await tick(); const oldId = row().id;
+    const focusing = expect(activity.focus(oldId)).rejects.toMatchObject({ code: 'navigation.changed' });
+    await activity.hint(hint(), sender()); activity.invalidateTab(1, true);
+    await tick(1000); await focusing;
+    const calls = vi.mocked(access.sample).mock.calls.length; await tick(2000);
+    expect(vi.mocked(access.sample).mock.calls.length).toBe(calls); expect(activity.snapshot().observations).toEqual([]);
   });
   it('schedules the latest provider when a tab changes origin during an old-provider sample', async () => {
     vi.mocked(access.hasPermission).mockResolvedValue(true);
@@ -278,18 +407,19 @@ describe('next attention and mark all as seen', () => {
     const first = activity.focusNextAttention(), second = activity.focusNextAttention();
     expect(second).toBe(first); await tick(1000); expect(await first).toBe('focused'); expect(focused()).toEqual([2]);
   });
-  it('marks every current attention as seen locally, returns the count and clears the badge', async () => {
+  it('marks every current attention as seen locally, returns the count and lowers the badge to the remaining work', async () => {
     activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'error_visible');
-    expect(access.badge).toHaveBeenLastCalledWith('2');
+    expect(painted()).toMatchObject({ text: '2', background: BADGE_COLORS.error_visible });
     const before = activity.snapshot().observations; vi.mocked(access.notify).mockClear();
     expect(activity.acknowledgeAll()).toBe(2); await tick();
-    expect(access.badge).toHaveBeenLastCalledWith(''); expect(access.notify).toHaveBeenCalled();
+    // Tab 3 still works: the badge drops the count and shows work in progress.
+    expect(painted()).toMatchObject({ text: '…', background: BADGE_COLORS.working, title: 'Pilovo — 1 en cours' }); expect(access.notify).toHaveBeenCalled();
     const after = activity.snapshot().observations;
     expect(after.map(observation => observation.attention && { ...observation.attention, acknowledged: false })).toEqual(before.map(observation => observation.attention));
     expect(after.filter(observation => observation.attention).every(observation => observation.attention!.acknowledged)).toBe(true);
     expect(byTab(3)).toMatchObject({ state: 'working' }); expect(access.focus).not.toHaveBeenCalled();
     expect(activity.acknowledgeAll()).toBe(0);
-    await raise(3, 'input_required'); expect(byTab(3).attention!.acknowledged).toBe(false); expect(access.badge).toHaveBeenLastCalledWith('1');
+    await raise(3, 'input_required'); expect(byTab(3).attention!.acknowledged).toBe(false); expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.input_required, textColor: BADGE_TEXT_COLOR });
     expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|documentId|activationId/);
   });
   it('limits mark all to the attention identities shown and ignores replaced, unknown or expired ones', async () => {
@@ -298,8 +428,665 @@ describe('next attention and mark all as seen', () => {
     await raise(2, 'error_visible');
     expect(activity.acknowledgeAll([...shown, crypto.randomUUID()])).toBe(1); await tick();
     expect(byTab(1).attention!.acknowledged).toBe(true); expect(byTab(2).attention).toMatchObject({ reason: 'error_visible', acknowledged: false });
-    expect(access.badge).toHaveBeenLastCalledWith('1');
+    expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.error_visible });
     now += ACTIVITY_TTL; expect(activity.acknowledgeAll()).toBe(0);
     expect(activity.snapshot().observations.every(observation => observation.state === 'unknown' && !observation.attention)).toBe(true);
+  });
+});
+
+describe('differentiated toolbar badge', () => {
+  const evidenceFor = new Map<number, ActivityEvidence>(), documents = new Map<number, string>(), activations = new Map<number, string>();
+  const tabOf = (id: number) => ({ id, windowId: 2, url: `https://chatgpt.com/c/PRIVATE_URL_CANARY_${id}`, status: 'complete' });
+  const byTab = (tabId: number) => activity.snapshot().observations.find(observation => observation.tabId === tabId)!;
+  const paints = () => vi.mocked(access.badge).mock.calls.length;
+  const raise = async (tabId: number, value: ActivityEvidence) => { evidenceFor.set(tabId, value); activity.updateTab(tabId, {}, tabOf(tabId)); await tick(1000); };
+  // Witnessed work, then two ready reads one second apart (the sample after the first is rescheduled by the debounce).
+  const ready = async (tabId: number) => { await raise(tabId, 'working'); await raise(tabId, 'idle_ready'); await tick(1000); expect(byTab(tabId).attention!.reason).toBe('response_ready'); };
+  const lit = (text: string, background: string, title: string) => ({ text, background, textColor: BADGE_TEXT_COLOR, title });
+  const hidden = { text: '', title: 'Pilovo' };
+  beforeEach(() => {
+    for (const id of [1, 2, 3]) { evidenceFor.set(id, 'idle_ready'); documents.set(id, `document-${id}`); activations.set(id, crypto.randomUUID()); }
+    vi.mocked(access.tabs).mockImplementation(async () => [1, 2, 3].map(tabOf));
+    vi.mocked(access.tab).mockImplementation(async id => tabOf(id));
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: evidenceFor.get(tabId)! } }]);
+  });
+  it('paints none, working only, response ready, input plus ready and error plus others from live observations', async () => {
+    activity.start(); await tick(); expect(activity.snapshot().observations.map(observation => observation.state)).toEqual(['idle', 'idle', 'idle']);
+    expect(painted()).toMatchObject(hidden); expect(paints()).toBe(1);
+    await raise(1, 'working'); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 1 en cours'));
+    await raise(2, 'working'); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 2 en cours'));
+    await raise(2, 'idle_ready'); await tick(1000); expect(byTab(2).attention!.reason).toBe('response_ready');
+    expect(painted()).toEqual(lit('1', BADGE_COLORS.response_ready, 'Pilovo — 1 à vérifier (réponse disponible) · 1 en cours'));
+    await raise(3, 'input_required'); expect(painted()).toEqual(lit('2', BADGE_COLORS.input_required, 'Pilovo — 2 à vérifier, dont 1 intervention demandée · 1 en cours'));
+    await raise(1, 'error_visible'); expect(painted()).toEqual(lit('3', BADGE_COLORS.error_visible, 'Pilovo — 3 à vérifier, dont 1 erreur visible'));
+    // Seen attention leaves the count, and so the color, to what still needs review.
+    activity.acknowledge(byTab(1).id, byTab(1).attention!.id); await tick();
+    expect(painted()).toEqual(lit('2', BADGE_COLORS.input_required, 'Pilovo — 2 à vérifier, dont 1 intervention demandée'));
+    activity.acknowledge(byTab(3).id, byTab(3).attention!.id); await tick(); expect(painted()).toEqual(lit('1', BADGE_COLORS.response_ready, 'Pilovo — 1 à vérifier (réponse disponible)'));
+    // Acknowledged attention only: hidden, whatever its reason.
+    expect(activity.acknowledgeAll()).toBe(1); await tick(); expect(painted()).toMatchObject(hidden);
+    expect(activity.snapshot().observations.every(observation => observation.state === 'attention' && observation.attention!.acknowledged)).toBe(true);
+    expect(JSON.stringify(vi.mocked(access.badge).mock.calls)).not.toMatch(/PRIVATE_URL|https:|chatgpt|ChatGPT|session|document-|[0-9a-f]{8}-[0-9a-f]{4}-/);
+  });
+  it('downgrades through the expiry watchdog, and clears after revoke, tab close or a worker restart', async () => {
+    // Each sample runs at `tick()` time (the tab's 1 s rate window has passed), so the watchdog is armed on the test clock.
+    const sampleNow = async (tabId: number, value: ActivityEvidence) => { evidenceFor.set(tabId, value); activity.updateTab(tabId, {}, tabOf(tabId)); await tick(); };
+    activity.start(); await tick(); await tick(1000); await sampleNow(1, 'error_visible'); await sampleNow(2, 'working');
+    await tick(1000); await sampleNow(2, 'working');
+    expect(painted()).toEqual(lit('1', BADGE_COLORS.error_visible, 'Pilovo — 1 à vérifier (erreur visible) · 1 en cours'));
+    // No renewal and no snapshot read: idle tab 3 expires (no change), then the error, leaving the work, then the work.
+    const expiries = [byTab(3).validUntil, byTab(1).validUntil, byTab(2).validUntil];
+    expect(expiries).toEqual([now + 13_000, now + 14_000, now + 15_000]);
+    await tick(expiries[0] - now); await tick(); expect(painted()).toEqual(lit('1', BADGE_COLORS.error_visible, 'Pilovo — 1 à vérifier (erreur visible) · 1 en cours'));
+    await tick(expiries[1] - now); await tick(); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 1 en cours'));
+    await tick(expiries[2] - now); await tick(); expect(painted()).toMatchObject(hidden);
+    expect(activity.snapshot().observations.map(observation => [observation.state, observation.unknownReason])).toEqual([['unknown', 'expired'], ['unknown', 'expired'], ['unknown', 'expired']]);
+    await raise(1, 'input_required'); await raise(2, 'working'); expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.input_required });
+    activity.revoke('chatgpt-web'); await tick(); expect(painted()).toMatchObject(hidden);
+    activity.reconcile('chatgpt-web'); await tick(1000); expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.input_required, title: 'Pilovo — 1 à vérifier (intervention demandée) · 1 en cours' });
+    activity.invalidateTab(1, true); await tick(); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 1 en cours'));
+    activity.invalidateTab(2, true); await tick(); expect(painted()).toMatchObject(hidden);
+    await raise(3, 'error_visible'); expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.error_visible });
+    // A new worker life paints hidden before any evidence, then needs fresh evidence to light it again.
+    const before = paints(); activity = new WebActivity(access); await tick();
+    expect(paints()).toBe(before + 1); expect(painted()).toMatchObject(hidden);
+    activity.start(); await tick(); expect(painted()).toEqual(lit('2', BADGE_COLORS.error_visible, 'Pilovo — 2 à vérifier, dont 1 erreur visible · 1 en cours'));
+  });
+  it('makes no badge call while the painted value is unchanged and repaints after a failed call', async () => {
+    activity.start(); await tick(); expect(paints()).toBe(1);
+    for (let step = 0; step < 3; step++) await raise(1, 'idle_ready');
+    expect(paints()).toBe(1);
+    await raise(1, 'working'); expect(paints()).toBe(2);
+    for (let step = 0; step < 3; step++) await raise(1, 'working');
+    expect(activity.acknowledgeAll()).toBe(0); await tick(); expect(paints()).toBe(2);
+    vi.mocked(access.badge).mockRejectedValueOnce(new Error('action unavailable'));
+    await raise(2, 'input_required'); expect(paints()).toBe(3);
+    // The same value is attempted again on the next change, then remembered.
+    await raise(2, 'input_required'); expect(paints()).toBe(4); expect(vi.mocked(access.badge).mock.calls[3][0]).toEqual(vi.mocked(access.badge).mock.calls[2][0]);
+    await raise(2, 'input_required'); expect(paints()).toBe(4);
+  });
+  it('follows the app language for the title only, without repainting when it does not change', async () => {
+    activity.start(); await tick(); await raise(1, 'input_required'); await ready(2); await raise(3, 'working');
+    expect(painted()).toEqual(lit('2', BADGE_COLORS.input_required, 'Pilovo — 2 à vérifier, dont 1 intervention demandée · 1 en cours'));
+    const count = paints();
+    activity.setLanguage('fr'); await tick(); expect(paints()).toBe(count);
+    activity.setLanguage('en'); await tick(); expect(paints()).toBe(count + 1);
+    expect(painted()).toEqual(lit('2', BADGE_COLORS.input_required, 'Pilovo — 2 to review, including 1 input request · 1 working'));
+    activity.setLanguage('en'); await tick(); expect(paints()).toBe(count + 1);
+    // Unexpected values fall back to the default language, French.
+    activity.setLanguage('de'); await tick(); expect(painted()!.title).toBe('Pilovo — 2 à vérifier, dont 1 intervention demandée · 1 en cours');
+    activity.setLanguage('en'); activity.acknowledgeAll(); await tick(); expect(painted()).toEqual(lit('…', BADGE_COLORS.working, 'Pilovo — 1 working'));
+  });
+});
+
+describe('stable session identity: numbers, positions and labels', () => {
+  const urls = new Map<number, string>(), indices = new Map<number, number | undefined>(), windows = new Map<number, number>();
+  const documents = new Map<number, string>(), activations = new Map<number, string>();
+  const gpt = (id: number) => `https://chatgpt.com/c/PRIVATE_URL_CANARY_${id}`, claude = (id: number) => `https://claude.ai/chat/PRIVATE_URL_CANARY_${id}`;
+  const tabOf = (id: number): WebTab => ({ id, windowId: windows.get(id) ?? 2, index: indices.get(id), url: urls.get(id), status: 'complete' });
+  const byTab = (tabId: number) => activity.snapshot().observations.find(observation => observation.tabId === tabId);
+  const numbers = () => Object.fromEntries(activity.snapshot().observations.map(observation => [observation.tabId, observation.sessionNumber]));
+  const samples = () => vi.mocked(access.sample).mock.calls.length;
+  // A tab event only requests a sample; the session is assigned when that leased sample commits.
+  const open = async (id: number, url: string, index?: number) => { urls.set(id, url); indices.set(id, index); documents.set(id, `document-${id}`); activations.set(id, crypto.randomUUID()); activity.updateTab(id, {}, tabOf(id)); await tick(1000); };
+  const go = async (id: number, url: string) => { urls.set(id, url); activity.updateTab(id, { url }, tabOf(id)); await tick(1000); };
+  const refused = (call: () => void) => { try { call(); } catch (error) { return (error as { code?: string }).code; } return undefined; };
+  beforeEach(() => {
+    for (const map of [urls, indices, windows, documents, activations]) map.clear();
+    vi.mocked(access.hasPermission).mockResolvedValue(true);
+    vi.mocked(access.tabs).mockImplementation(async provider => [...urls.keys()].filter(id => urls.get(id)!.startsWith(provider === 'claude-web' ? 'https://claude.ai/' : 'https://chatgpt.com/')).map(tabOf));
+    vi.mocked(access.tab).mockImplementation(async id => { if (!urls.has(id)) throw new Error('No tab with id'); return tabOf(id); });
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: 'working' } }]);
+  });
+  it('numbers each provider from 1 at first observation; another tab closing never renumbers; the smallest free number is reused', async () => {
+    activity.start(); await tick();
+    await open(1, gpt(1)); await open(2, gpt(2)); await open(3, gpt(3)); await open(7, claude(7));
+    expect(numbers()).toEqual({ 1: 1, 2: 2, 3: 3, 7: 1 });
+    activity.invalidateTab(2, true); urls.delete(2);
+    expect(numbers()).toEqual({ 1: 1, 3: 3, 7: 1 });
+    await open(4, gpt(4)); await open(8, claude(8));
+    expect(numbers()).toEqual({ 1: 1, 3: 3, 4: 2, 7: 1, 8: 2 });
+    await open(5, gpt(5)); expect(byTab(5)!.sessionNumber).toBe(4);
+    // Later samples, hints and refreshes never move a number.
+    for (const id of [1, 3, 4, 5]) activity.updateTab(id, {}, tabOf(id));
+    await activity.refresh(); await tick(1000);
+    expect(numbers()).toEqual({ 1: 1, 3: 3, 4: 2, 5: 4, 7: 1, 8: 2 });
+  });
+  it('keeps the number and label across SPA routes, reloads, new documents, discarding and expiry in the same tab', async () => {
+    activity.start(); await tick(); await open(1, gpt(1)); await open(2, gpt(2));
+    activity.label(byTab(2)!.id, 'Revue contrat');
+    const ids = new Set([byTab(2)!.id]);
+    // An SPA route invalidates the record at once (navigation), then a new activation gives a new observation identity.
+    urls.set(2, `${gpt(2)}/route`); activity.updateTab(2, { url: urls.get(2) }, tabOf(2));
+    expect(byTab(2)).toMatchObject({ state: 'unknown', unknownReason: 'navigation', sessionNumber: 2, label: 'Revue contrat' }); ids.add(byTab(2)!.id);
+    activations.set(2, crypto.randomUUID()); await tick(1000);
+    expect(byTab(2)).toMatchObject({ state: 'working', sessionNumber: 2, label: 'Revue contrat' }); ids.add(byTab(2)!.id);
+    // A reload: loading, then a new document.
+    documents.set(2, 'document-2-reloaded'); activity.updateTab(2, { status: 'loading' }, { ...tabOf(2), status: 'loading' });
+    activity.updateTab(2, { status: 'complete' }, tabOf(2)); await tick(1000);
+    expect(byTab(2)).toMatchObject({ state: 'working', sessionNumber: 2, label: 'Revue contrat' }); ids.add(byTab(2)!.id);
+    activity.updateTab(2, { discarded: true }); expect(byTab(2)).toMatchObject({ state: 'unknown', sessionNumber: 2, label: 'Revue contrat' });
+    activity.updateTab(2, { discarded: false }, tabOf(2)); await tick(1000);
+    // Expired evidence: a later sample starts a new record, still the same tab.
+    now += ACTIVITY_TTL; expect(byTab(2)).toMatchObject({ state: 'unknown', unknownReason: 'expired', sessionNumber: 2, label: 'Revue contrat' });
+    activity.updateTab(2, {}, tabOf(2)); await tick(1000); expect(byTab(2)).toMatchObject({ state: 'working', sessionNumber: 2, label: 'Revue contrat' }); ids.add(byTab(2)!.id);
+    expect(ids.size).toBeGreaterThanOrEqual(4);
+    expect(byTab(1)).toMatchObject({ sessionNumber: 1 }); expect(byTab(1)!.label).toBeUndefined();
+  });
+  it('releases numbers when a tab leaves its provider; labels stay with the open tab until it closes, its provider is revoked or the worker restarts', async () => {
+    activity.start(); await tick(); await open(1, gpt(1)); await open(2, gpt(2)); await open(7, claude(7));
+    activity.label(byTab(1)!.id, 'Alpha'); activity.label(byTab(7)!.id, 'Gamma');
+    // Leaving the provider ends the session: coming back later gets the smallest number free then. The label is bound to
+    // the tab's lifetime, not to its number: hidden while the tab is elsewhere, shown again when it returns.
+    await go(1, 'https://example.test/elsewhere');
+    expect(byTab(1)).toBeUndefined(); expect(numbers()).toEqual({ 2: 2, 7: 1 });
+    await open(3, gpt(3)); expect(byTab(3)!.sessionNumber).toBe(1);
+    await go(1, gpt(1)); expect(byTab(1)).toMatchObject({ provider: 'chatgpt-web', sessionNumber: 3, label: 'Alpha' });
+    // Switching provider in the same tab releases the old number at once and never shows the label on the other provider.
+    activity.label(byTab(2)!.id, 'Beta');
+    urls.set(2, claude(2)); activity.updateTab(2, { url: urls.get(2) }, tabOf(2));
+    expect(byTab(2)).toBeUndefined(); await tick(1000);
+    expect(byTab(2)).toMatchObject({ provider: 'claude-web', sessionNumber: 2 }); expect(byTab(2)).not.toHaveProperty('label');
+    await open(4, gpt(4)); expect(byTab(4)!.sessionNumber).toBe(2);
+    // Revocation clears that provider's numbers and labels only, including the label of a tab currently elsewhere.
+    activity.label(byTab(3)!.id, 'Delta');
+    activity.revoke('claude-web'); expect(activity.snapshot().observations.map(observation => observation.provider)).not.toContain('claude-web');
+    expect(byTab(3)).toMatchObject({ sessionNumber: 1, label: 'Delta' }); expect(byTab(1)!.label).toBe('Alpha');
+    activity.reconcile('claude-web'); await tick(1000);
+    expect([byTab(2)!.sessionNumber, byTab(7)!.sessionNumber].sort()).toEqual([1, 2]); expect(byTab(7)).not.toHaveProperty('label');
+    // Tab 2 returns to ChatGPT: the label it was given there is shown again, with a new number.
+    await go(2, gpt(2)); expect(byTab(2)).toMatchObject({ provider: 'chatgpt-web', sessionNumber: 4, label: 'Beta' });
+    await go(2, 'https://example.test/elsewhere'); activity.revoke('chatgpt-web'); activity.reconcile('chatgpt-web'); await tick(1000);
+    await go(2, gpt(2)); expect(byTab(2)).toMatchObject({ provider: 'chatgpt-web' }); expect(byTab(2)).not.toHaveProperty('label');
+    expect(activity.snapshot().observations.some(observation => 'label' in observation)).toBe(false);
+    // Closing a tab while it is elsewhere drops its label too: a later tab with the same ID starts unlabeled.
+    activity.label(byTab(1)!.id, 'Epsilon'); await go(1, 'https://example.test/elsewhere');
+    activity.invalidateTab(1, true); await go(1, gpt(1)); expect(byTab(1)).not.toHaveProperty('label');
+    activity.label(byTab(3)!.id, 'Zeta'); activity.label(byTab(7)!.id, 'Eta'); expect(byTab(3)!.label).toBe('Zeta');
+    // A worker restart keeps nothing: fresh numbers in observation order, no label.
+    activity = new WebActivity(access); expect(activity.snapshot().observations).toEqual([]);
+    activity.start(); await tick(1000);
+    expect(numbers()).toEqual({ 1: 1, 2: 2, 3: 3, 4: 4, 7: 1 });
+    expect(activity.snapshot().observations.some(observation => 'label' in observation)).toBe(false);
+  });
+  it('carries Chrome tab positions and re-reads them on tab moves without sampling, painting or changing state', async () => {
+    activity.start(); await tick(); await open(1, gpt(1), 0); await open(2, gpt(2), 4); await open(3, gpt(3));
+    expect(byTab(1)!.tabIndex).toBe(0); expect(byTab(2)!.tabIndex).toBe(4); expect(byTab(3)).not.toHaveProperty('tabIndex');
+    const before = samples(), paints = vi.mocked(access.badge).mock.calls.length, states = activity.snapshot().observations.map(observation => [observation.id, observation.state]);
+    vi.mocked(access.notify).mockClear();
+    indices.set(1, 2); indices.set(2, 1); indices.set(3, 7); windows.set(2, 5);
+    await activity.reindex();
+    expect(byTab(1)).toMatchObject({ tabIndex: 2, windowId: 2 }); expect(byTab(2)).toMatchObject({ tabIndex: 1, windowId: 5 }); expect(byTab(3)!.tabIndex).toBe(7);
+    expect(activity.snapshot().observations.map(observation => [observation.id, observation.state])).toEqual(states);
+    expect(samples()).toBe(before); expect(access.notify).toHaveBeenCalled(); expect(vi.mocked(access.badge).mock.calls.length).toBe(paints);
+    // Nothing moved: no notification. Invalid positions and unreadable tabs leave the last known position.
+    vi.mocked(access.notify).mockClear(); await activity.reindex(); expect(access.notify).not.toHaveBeenCalled();
+    indices.set(1, -1); indices.set(2, 1.5); urls.delete(3); await activity.reindex();
+    expect(byTab(1)!.tabIndex).toBe(2); expect(byTab(2)!.tabIndex).toBe(1); expect(byTab(3)!.tabIndex).toBe(7);
+    // Each committed sample refreshes the position as well.
+    indices.set(1, 6); activity.updateTab(1, {}, tabOf(1)); await tick(1000); expect(byTab(1)!.tabIndex).toBe(6);
+    // A newer pass supersedes an older one still waiting for Chrome.
+    const slow = deferred<WebTab>(); vi.mocked(access.tab).mockImplementationOnce(() => slow.promise);
+    const older = activity.reindex(); indices.set(1, 9); await activity.reindex(); expect(byTab(1)!.tabIndex).toBe(9);
+    slow.resolve({ ...tabOf(1), index: 3 }); await older; expect(byTab(1)!.tabIndex).toBe(9);
+  });
+  it('keeps a label on its own tab only, in memory, without ever painting it on the badge or its title', async () => {
+    activity.start(); await tick(); await open(1, gpt(1)); await open(2, gpt(2));
+    vi.mocked(access.notify).mockClear();
+    activity.label(byTab(1)!.id, '  Revue PRIVATE_LABEL_CANARY  ');
+    expect(byTab(1)!.label).toBe('Revue PRIVATE_LABEL_CANARY'); expect(byTab(2)).not.toHaveProperty('label'); expect(access.notify).toHaveBeenCalled();
+    activity.label(byTab(2)!.id, 'x'.repeat(40)); expect(byTab(2)!.label).toBe('x'.repeat(40));
+    // Badge and title are computed from state alone: raising attention paints counts and fixed words only.
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: 'input_required' } }]);
+    activity.updateTab(1, {}, tabOf(1)); await tick(1000);
+    expect(painted()).toMatchObject({ text: '1', title: 'Pilovo — 1 à vérifier (intervention demandée) · 1 en cours' });
+    activity.setLanguage('en'); await tick();
+    expect(JSON.stringify(vi.mocked(access.badge).mock.calls)).not.toMatch(/PRIVATE_LABEL|Revue|xxxx/);
+    activity.label(byTab(1)!.id, null); expect(byTab(1)).not.toHaveProperty('label'); expect(byTab(2)!.label).toBe('x'.repeat(40));
+    // Refused before any change: malformed labels, then IDs that name no current observation.
+    for (const invalid of ['', '   ', 'x'.repeat(41), 'a\u0007b', 'a\nb', 'a\tb', 'a\u007fb', 'a\u0085b', 'a\u202Eb', 'a\u2067b', 42, undefined]) expect(refused(() => activity.label(byTab(2)!.id, invalid as string)), JSON.stringify(invalid)).toBe('validation.invalid');
+    expect(refused(() => activity.label(crypto.randomUUID(), 'Autre'))).toBe('navigation.expired'); expect(byTab(2)!.label).toBe('x'.repeat(40));
+    // As for focus and seen, only a live observation can be named or cleared: not one whose evidence has expired (the
+    // label it already has is still shown), not a navigation placeholder, not a replaced observation.
+    now += ACTIVITY_TTL; const expired = byTab(2)!; expect(expired).toMatchObject({ state: 'unknown', unknownReason: 'expired', label: 'x'.repeat(40) });
+    for (const label of ['Plus tard', null]) expect(refused(() => activity.label(expired.id, label))).toBe('navigation.expired');
+    expect(byTab(2)!.label).toBe('x'.repeat(40));
+    // Evidence that lapses without a snapshot in between is refused too: label() checks the deadline itself.
+    activity.updateTab(2, {}, tabOf(2)); await tick(1000); const fresh = byTab(2)!; expect(fresh.state).toBe('attention');
+    now += ACTIVITY_TTL; expect(refused(() => activity.label(fresh.id, 'Plus tard'))).toBe('navigation.expired');
+    activity.updateTab(2, {}, tabOf(2)); await tick(1000); activity.label(byTab(2)!.id, 'Plus tard'); expect(byTab(2)!.label).toBe('Plus tard');
+    const replaced = byTab(2)!;
+    activity.updateTab(2, { status: 'loading' }, { ...tabOf(2), status: 'loading' });
+    expect(byTab(2)).toMatchObject({ unknownReason: 'navigation', label: 'Plus tard' });
+    for (const id of [replaced.id, byTab(2)!.id]) expect(refused(() => activity.label(id, 'Trop tard'))).toBe('navigation.expired');
+    expect(byTab(2)!.label).toBe('Plus tard');
+    // Closing the tab drops its label; a new tab that reuses the number starts unlabeled.
+    activity.invalidateTab(2, true); urls.delete(2); await open(4, gpt(4));
+    expect(byTab(4)).toMatchObject({ sessionNumber: 2 }); expect(byTab(4)).not.toHaveProperty('label');
+    expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|Plus tard|PRIVATE_LABEL/);
+  });
+});
+
+describe('optional automatic seen after dwelling on the tab', () => {
+  const evidenceFor = new Map<number, ActivityEvidence>(), documents = new Map<number, string>(), activations = new Map<number, string>();
+  const tabOf = (id: number) => ({ id, windowId: 2, url: `https://chatgpt.com/c/PRIVATE_URL_CANARY_${id}`, status: 'complete' });
+  const byTab = (tabId: number) => activity.snapshot().observations.find(observation => observation.tabId === tabId);
+  const seen = (tabId: number) => byTab(tabId)?.attention?.acknowledged;
+  const asked = () => vi.mocked(access.viewing).mock.calls.length;
+  // What Chrome answers when asked for the active tab of its focused window. Its events only make the worker ask again.
+  let view: ActivityView | undefined;
+  const look = async (tabId?: number, windowId = 2) => { view = tabId === undefined ? undefined : { tabId, windowId }; activity.viewChanged(); await tick(); };
+  const raise = async (tabId: number, value: ActivityEvidence) => { evidenceFor.set(tabId, value); activity.updateTab(tabId, {}, tabOf(tabId)); await tick(1000); };
+  // Heartbeats: samples of unchanged evidence keep the same attention identity live, and so do not restart a dwell.
+  const keep = async (ms: number, tabIds = [1, 2]) => { const end = now + ms; while (now < end) { for (const id of tabIds) activity.updateTab(id, {}, tabOf(id)); await tick(Math.min(1000, end - now)); } };
+  beforeEach(() => {
+    view = undefined;
+    for (const id of [1, 2]) { evidenceFor.set(id, 'working'); documents.set(id, `document-${id}`); activations.set(id, crypto.randomUUID()); }
+    vi.mocked(access.tabs).mockImplementation(async () => [1, 2].map(tabOf));
+    vi.mocked(access.tab).mockImplementation(async id => tabOf(id));
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: evidenceFor.get(tabId)! } }]);
+    vi.mocked(access.viewing).mockImplementation(async () => view && { ...view });
+  });
+  it('is off by default and for any unexpected value: Chrome is never asked and nothing is acknowledged', async () => {
+    activity.start(); await tick(); await raise(1, 'input_required'); await look(1);
+    for (const value of [10, -1, '5', 5.5, null, undefined, true, [5]]) activity.setAutoAcknowledge(value);
+    await keep(60_000); await look(1);
+    expect(seen(1)).toBe(false); expect(asked()).toBe(0); expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.input_required });
+  });
+  it('acknowledges only the viewed attention after exactly N continuous seconds, through the seen path, and repaints the badge', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'error_visible');
+    expect(painted()).toMatchObject({ text: '2', background: BADGE_COLORS.error_visible });
+    const attention = byTab(1)!.attention!, other = byTab(2)!.attention!, acknowledge = vi.spyOn(activity, 'acknowledge');
+    await look(1); await keep(4999); expect(seen(1)).toBe(false); expect(acknowledge).not.toHaveBeenCalled();
+    vi.mocked(access.notify).mockClear(); const before = asked();
+    await tick(1);
+    expect(byTab(1)!.attention).toEqual({ ...attention, acknowledged: true }); expect(acknowledge).toHaveBeenCalledExactlyOnceWith(byTab(1)!.id, attention.id);
+    // Chrome was asked again at the deadline. The other tab's attention is untouched and the badge lowers to it.
+    expect(asked()).toBe(before + 1); expect(byTab(2)!.attention).toEqual(other);
+    expect(painted()).toMatchObject({ text: '1', background: BADGE_COLORS.error_visible, title: 'Pilovo — 1 à vérifier (erreur visible)' }); expect(access.notify).toHaveBeenCalled();
+    await keep(30_000); expect(acknowledge).toHaveBeenCalledOnce(); expect(seen(2)).toBe(false); expect(access.focus).not.toHaveBeenCalled();
+    expect(JSON.stringify(activity.snapshot())).not.toMatch(/PRIVATE_URL|https:|documentId|activationId/);
+  });
+  it('starts the dwell when attention is raised on a tab already viewed', async () => {
+    activity.setAutoAcknowledge(15); activity.start(); await tick(); await look(1);
+    // Work while viewed: nothing to acknowledge, so no deadline is asked about.
+    await keep(10_000); const before = asked();
+    await raise(1, 'input_required'); const raisedAt = byTab(1)!.attention!.raisedAt; expect(raisedAt).toBe(now);
+    await keep(14_999); expect(seen(1)).toBe(false); expect(asked()).toBe(before);
+    await tick(1); expect(seen(1)).toBe(true); expect(now - raisedAt).toBe(15_000);
+  });
+  it('stops on a tab switch, a window blur, WINDOW_ID_NONE or another focused window; coming back restarts it in full', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required');
+    await look(1); await keep(3000);
+    await look(2); await keep(3000); expect(seen(1)).toBe(false);
+    await look(1); await keep(4999); expect(seen(1)).toBe(false);
+    // Chrome lost focus (another application): the event alone stops the dwell, without asking Chrome.
+    const before = asked(); activity.viewChanged(-1); await keep(10_000); expect(seen(1)).toBe(false); expect(asked()).toBe(before);
+    // Focus moves to another window, whose active tab Chrome then reports.
+    view = { tabId: 7, windowId: 5 }; activity.viewChanged(5); await keep(10_000); expect(seen(1)).toBe(false); expect(asked()).toBe(before + 1);
+    await look(1); await keep(3000);
+    // A blur with no focused window answered later by Chrome: the tab still active but no window focused.
+    view = undefined; activity.viewChanged(1); await keep(10_000); expect(seen(1)).toBe(false);
+    view = { tabId: 1, windowId: 2 }; activity.viewChanged(2); await keep(4999); expect(seen(1)).toBe(false);
+    await tick(1); expect(seen(1)).toBe(true);
+  });
+  it('keeps a dwell through tab events in other windows; one in the viewed window or on the viewed tab restarts it', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required');
+    await look(1); await keep(1000); const before = asked();
+    // Chrome activates a neighbor in a background window (a tab closed there); a tab moves between two other windows.
+    activity.tabViewChanged(9, 7); await keep(1000); activity.tabViewChanged(10, 7); activity.tabViewChanged(10, 8); await keep(2000);
+    // Neither stopped it nor asked Chrome again: exactly 5 s after viewing began, the deadline query alone confirms it.
+    expect(asked()).toBe(before); await keep(999); expect(seen(1)).toBe(false);
+    await tick(1); expect(seen(1)).toBe(true); expect(asked()).toBe(before + 1);
+    // A new attention: an activation in the viewed window, or an event moving the viewed tab, stops the dwell at once.
+    for (const [tabId, windowId, reason] of [[2, 2, 'error_visible'], [1, 7, 'input_required']] as const) {
+      await raise(1, reason); await keep(2000);
+      const asking = asked(); activity.tabViewChanged(tabId, windowId); await tick(); expect(asked()).toBe(asking + 1);
+      await keep(4999); expect(seen(1)).toBe(false); await tick(1); expect(seen(1)).toBe(true);
+    }
+  });
+  it('never acknowledges while the panel or full page has focus beside another tab, or the tab sits in another window', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    // The full-page Pilovo tab (not observed) is the active tab of the focused window.
+    await look(99); await keep(10_000);
+    // The reported window is not the observed tab's window: the tab moved and no sample or position read confirms it yet.
+    await look(1, 8); await keep(10_000);
+    expect([seen(1), seen(2)]).toEqual([false, false]);
+  });
+  it('stops on navigation; the new attention raised in the still viewed tab gets its own full dwell', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required');
+    const first = byTab(1)!.attention!; await look(1); await keep(3000);
+    activity.updateTab(1, { url: `${tabOf(1).url}/next` }, tabOf(1)); expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'navigation' });
+    await tick(1000); const second = byTab(1)!.attention!; expect(second).toMatchObject({ raisedAt: now, acknowledged: false }); expect(second.id).not.toBe(first.id);
+    // The first deadline (2 s after navigation) passes without acknowledging anything.
+    await keep(4999); expect(seen(1)).toBe(false);
+    await tick(1); expect(byTab(1)!.attention).toEqual({ ...second, acknowledged: true });
+  });
+  it('replaces the dwell when a new attention identity is raised: the old deadline passes, the new one is N s after its raise', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required');
+    const acknowledge = vi.spyOn(activity, 'acknowledge');
+    await look(1); await keep(2000); await raise(1, 'error_visible');
+    const replaced = byTab(1)!.attention!; expect(replaced.reason).toBe('error_visible');
+    await keep(2000); expect(seen(1)).toBe(false); expect(acknowledge).not.toHaveBeenCalled();
+    await keep(2999); expect(seen(1)).toBe(false);
+    await tick(1); expect(acknowledge).toHaveBeenCalledExactlyOnceWith(byTab(1)!.id, replaced.id); expect(byTab(1)!.attention).toEqual({ ...replaced, acknowledged: true });
+  });
+  it.each(['closure', 'revocation', 'manual seen', 'mark all', 'expiry'] as const)('stops on %s and acknowledges nothing at the deadline', async change => {
+    activity.setAutoAcknowledge(change === 'expiry' ? 30 : 5); activity.start(); await tick(); await raise(1, 'input_required');
+    await look(1); await keep(3000); const before = asked();
+    const acknowledge = vi.spyOn(activity, 'acknowledge');
+    if (change === 'closure') activity.invalidateTab(1, true);
+    else if (change === 'revocation') activity.revoke('chatgpt-web');
+    else if (change === 'manual seen') activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id);
+    else if (change === 'mark all') activity.acknowledgeAll();
+    // Expiry: no heartbeat renews the evidence, which lapses 15 s after the last sample, before the 30 s deadline.
+    await (change === 'expiry' || change === 'closure' || change === 'revocation' ? tick(40_000) : keep(40_000));
+    expect(acknowledge).toHaveBeenCalledTimes(change === 'manual seen' ? 1 : 0); expect(asked()).toBe(before);
+    if (change === 'manual seen' || change === 'mark all') expect(seen(1)).toBe(true);
+    else if (change === 'expiry') expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
+    else expect(byTab(1)).toBeUndefined();
+  });
+  it('requires evidence still live at the deadline: a deadline exactly at validUntil acknowledges nothing', async () => {
+    activity.setAutoAcknowledge(15); activity.start(); await tick(); await raise(1, 'input_required');
+    await look(1); expect(byTab(1)!.validUntil).toBe(now + 15_000);
+    await tick(15_000); expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' }); expect(byTab(1)!.attention).toBeUndefined();
+  });
+  it('re-verifies from a fresh query at the deadline: a stale cached view, a lost focus or a failed query acknowledges nothing', async () => {
+    activity.setAutoAcknowledge(5); activity.start(); await tick(); await raise(1, 'input_required');
+    // The user left for tab 2 but that event has not reached the worker: only the deadline query sees it.
+    await look(1); view = { tabId: 2, windowId: 2 }; await keep(10_000); expect(seen(1)).toBe(false);
+    // Chrome no longer has a focused window, and its blur event was missed.
+    await look(1); view = undefined; await keep(10_000); expect(seen(1)).toBe(false);
+    // Chrome cannot answer: nothing is acknowledged and no rejection escapes.
+    await look(1); vi.mocked(access.viewing).mockRejectedValueOnce(new Error('No current window')); await keep(10_000); expect(seen(1)).toBe(false);
+    // A view event while the deadline query is pending wins over its answer.
+    const slow = deferred<ActivityView | undefined>(); await look(1); vi.mocked(access.viewing).mockReturnValueOnce(slow.promise);
+    await keep(5000); view = { tabId: 2, windowId: 2 }; activity.viewChanged(); slow.resolve({ tabId: 1, windowId: 2 }); await keep(10_000); expect(seen(1)).toBe(false);
+    // Once Chrome answers consistently, a full dwell acknowledges it.
+    await look(1); await keep(5000); expect(seen(1)).toBe(true);
+  });
+  it('follows setting changes: 15 to 0 stops the dwell, 0 to 5 while viewing starts it from the current view', async () => {
+    activity.setAutoAcknowledge(15); activity.start(); await tick(); await raise(1, 'input_required'); await look(1);
+    await keep(10_000); activity.setAutoAcknowledge(0); const before = asked();
+    await keep(20_000); expect(seen(1)).toBe(false); expect(asked()).toBe(before);
+    // Re-enabled without any tab or window event: the worker asks Chrome what is viewed now.
+    activity.setAutoAcknowledge(5); await tick(); expect(asked()).toBe(before + 1);
+    await keep(4999); expect(seen(1)).toBe(false); await tick(1); expect(seen(1)).toBe(true);
+    // A longer delay restarts from the change for the next attention.
+    await raise(1, 'error_visible'); await keep(2000); activity.setAutoAcknowledge(30); await keep(29_999); expect(seen(1)).toBe(false);
+    await tick(1); expect(seen(1)).toBe(true);
+  });
+});
+
+describe('optional OS notifications', () => {
+  const evidenceFor = new Map<number, ActivityEvidence>(), documents = new Map<number, string>(), activations = new Map<number, string>();
+  let tabIds = [1, 2], permitted = true, view: ActivityView | undefined;
+  const tabOf = (id: number) => ({ id, windowId: 2, index: id, url: `https://chatgpt.com/c/PRIVATE_URL_CANARY_${id}`, status: 'complete' });
+  const byTab = (tabId: number) => activity.snapshot().observations.find(observation => observation.tabId === tabId);
+  // What Chrome displays: created, then cleared or closed.
+  const displayed = new Map<string, ActivityNotice>();
+  const created = () => vi.mocked(access.showNotification).mock.calls;
+  const cleared = () => vi.mocked(access.clearNotification).mock.calls.map(([id]) => id);
+  const idOf = (tabId: number) => noticeId(byTab(tabId)!.id, byTab(tabId)!.attention!.id);
+  const raise = async (tabId: number, value: ActivityEvidence) => { evidenceFor.set(tabId, value); activity.updateTab(tabId, {}, tabOf(tabId)); await tick(1000); await tick(); };
+  // Heartbeats: samples of unchanged evidence keep the same attention identity.
+  const keep = async (ms: number, ids = tabIds) => { const end = now + ms; while (now < end) { for (const id of ids) activity.updateTab(id, {}, tabOf(id)); await tick(Math.min(1000, end - now)); } };
+  const look = async (tabId?: number) => { view = tabId === undefined ? undefined : { tabId, windowId: 2 }; activity.viewChanged(); await tick(); };
+  beforeEach(() => {
+    tabIds = [1, 2]; permitted = true; view = undefined; displayed.clear();
+    for (const id of Array.from({ length: 24 }, (_, index) => index + 1)) { evidenceFor.set(id, 'working'); documents.set(id, `document-${id}`); activations.set(id, crypto.randomUUID()); }
+    vi.mocked(access.tabs).mockImplementation(async () => tabIds.map(tabOf));
+    vi.mocked(access.tab).mockImplementation(async id => tabOf(id));
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => [{ frameId: 0, documentId: documents.get(tabId), result: { version: 1, requestId: lease.requestId, activationId: activations.get(tabId)!, evidence: evidenceFor.get(tabId)! } }]);
+    vi.mocked(access.viewing).mockImplementation(async () => view && { ...view });
+    vi.mocked(access.canNotify).mockImplementation(async () => permitted);
+    vi.mocked(access.showNotification).mockImplementation(async (id, notice) => { displayed.set(id, notice); });
+    vi.mocked(access.clearNotification).mockImplementation(async id => { displayed.delete(id); });
+  });
+  it('notifies once when a new attention is raised, with the service, reason and session number only, in the app language', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick();
+    // A session name typed by the user never reaches a notification.
+    activity.label(byTab(1)!.id, 'PRIVATE_LABEL_CANARY'); activity.label(byTab(2)!.id, 'PRIVATE_LABEL_CANARY');
+    await raise(1, 'input_required');
+    const first = idOf(1);
+    expect(created()).toEqual([[first, { title: 'ChatGPT', message: 'Intervention demandée · session 1' }]]);
+    expect(first).toMatch(/^pilovo:[0-9a-f-]{36}:[0-9a-f-]{36}$/); expect(parseNoticeId(first)).toEqual({ observationId: byTab(1)!.id, attentionId: byTab(1)!.attention!.id });
+    // Heartbeats keep the same identity: still one notification, and the badge is unaffected.
+    await keep(10_000); expect(created()).toHaveLength(1); expect([...displayed.keys()]).toEqual([first]);
+    activity.setLanguage('en'); await raise(2, 'error_visible');
+    expect(created()[1]).toEqual([idOf(2), { title: 'ChatGPT', message: 'Error visible · session 2' }]);
+    // A response becomes available after observed work, replacing tab 1's notification.
+    await raise(1, 'working'); expect(displayed.has(first)).toBe(false);
+    await raise(1, 'idle_ready'); await raise(1, 'idle_ready');
+    expect(byTab(1)!.attention!.reason).toBe('response_ready'); expect(created()[2]).toEqual([idOf(1), { title: 'ChatGPT', message: 'Response available · session 1' }]);
+    expect(created()).toHaveLength(3); expect(activity.snapshot().observations.every(observation => !observation.attention!.acknowledged)).toBe(true);
+    expect(JSON.stringify(created())).not.toMatch(/PRIVATE|https:|chatgpt\.com|document-|label/i);
+    expect(access.focus).not.toHaveBeenCalled();
+  });
+  it('words each reason in French and English and names Claude for its service', async () => {
+    const { activityNotice } = await import('../../src/background/activity-notifications');
+    expect(['response_ready', 'input_required', 'error_visible'].map(reason => activityNotice('claude-web', reason as never, 3, 'fr'))).toEqual([
+      { title: 'Claude', message: 'Réponse disponible · session 3' }, { title: 'Claude', message: 'Intervention demandée · session 3' }, { title: 'Claude', message: 'Erreur visible · session 3' }]);
+    expect(['response_ready', 'input_required', 'error_visible'].map(reason => activityNotice('chatgpt-web', reason as never, 1, 'en').message)).toEqual(['Response available · session 1', 'Input requested · session 1', 'Error visible · session 1']);
+  });
+  it('never notifies a service left off, without the permission, or for the tab being viewed', async () => {
+    activity.start(); await tick();
+    // Off by default: the permission and the view are not even asked.
+    await raise(1, 'input_required'); expect(access.canNotify).not.toHaveBeenCalled(); expect(access.viewing).not.toHaveBeenCalled();
+    activity.setNotifyProviders(['claude-web']); await raise(1, 'error_visible'); expect(access.canNotify).not.toHaveBeenCalled();
+    // Enabled but Chrome no longer grants the permission, or cannot answer.
+    activity.setNotifyProviders(['chatgpt-web']); permitted = false; await raise(1, 'input_required'); expect(access.canNotify).toHaveBeenCalledOnce();
+    vi.mocked(access.canNotify).mockRejectedValueOnce(new Error('unavailable')); await raise(1, 'error_visible');
+    expect(created()).toEqual([]);
+    // Granted: not for the active tab of the focused window, but for another tab.
+    permitted = true; view = { tabId: 1, windowId: 2 }; await raise(1, 'input_required'); expect(created()).toEqual([]);
+    await raise(2, 'input_required'); expect(created().map(([id]) => id)).toEqual([idOf(2)]);
+    // A failed view query counts as not viewed.
+    vi.mocked(access.viewing).mockRejectedValueOnce(new Error('No window')); await raise(1, 'error_visible'); expect(created().map(([id]) => id)).toEqual([idOf(2), idOf(1)]);
+    // Unsupported values mean no service at all.
+    for (const value of [['chatgpt-web', 'chatgpt-web'], ['other-web'], 'chatgpt-web', null, undefined, [1]]) { activity.setNotifyProviders(value); await raise(2, byTab(2)!.attention!.reason === 'error_visible' ? 'input_required' : 'error_visible'); }
+    expect(created()).toHaveLength(2);
+  });
+  it('never notifies attention raised before its service was enabled, even when re-enabled during the checks', async () => {
+    activity.start(); await tick(); await raise(1, 'input_required');
+    activity.setNotifyProviders(['chatgpt-web']); await keep(20_000); expect(created()).toEqual([]);
+    // Raised while enabled, but the setting goes off and on again before the permission answers.
+    const slow = deferred<boolean>(); vi.mocked(access.canNotify).mockReturnValueOnce(slow.promise);
+    await raise(2, 'input_required'); activity.setNotifyProviders([]); activity.setNotifyProviders(['chatgpt-web']); slow.resolve(true); await tick();
+    expect(created()).toEqual([]);
+    // An attention raised after enabling is notified.
+    await raise(1, 'error_visible'); expect(created().map(([id]) => id)).toEqual([idOf(1)]);
+  });
+  it('re-checks everything after the asynchronous checks: an attention seen, replaced or expired meanwhile is not notified', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick();
+    for (const change of ['seen', 'replaced', 'navigation'] as const) {
+      const slow = deferred<boolean>(); vi.mocked(access.canNotify).mockReturnValueOnce(slow.promise);
+      await raise(1, change === 'replaced' ? 'input_required' : 'error_visible');
+      if (change === 'seen') activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id);
+      else if (change === 'replaced') { permitted = false; await raise(1, 'error_visible'); permitted = true; }
+      else activity.updateTab(1, { url: `${tabOf(1).url}/next` }, tabOf(1));
+      slow.resolve(true); await tick(); expect(created(), change).toEqual([]);
+      await raise(1, 'working');
+    }
+  });
+  it('keeps one notification per tab: a newer attention replaces it; at most NOTICE_LIMIT are shown, oldest cleared first', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick();
+    await raise(1, 'input_required'); const first = idOf(1);
+    await raise(1, 'error_visible'); const second = idOf(1);
+    expect(cleared()).toEqual([first]); expect([...displayed.keys()]).toEqual([second]);
+    // Creation and clearing are serialized: Chrome never sees a clear before the creation it undoes.
+    const order = [...vi.mocked(access.showNotification).mock.invocationCallOrder, ...vi.mocked(access.clearNotification).mock.invocationCallOrder].sort((a, b) => a - b);
+    expect(order[1]).toBe(vi.mocked(access.clearNotification).mock.invocationCallOrder[0]);
+    tabIds = Array.from({ length: NOTICE_LIMIT + 4 }, (_, index) => index + 1); activity.refresh(); await tick(1000);
+    for (const id of tabIds) evidenceFor.set(id, 'input_required');
+    for (const id of tabIds.slice(1)) { activity.updateTab(id, {}, tabOf(id)); await tick(); }
+    await tick(1000); await tick();
+    expect(displayed.size).toBe(NOTICE_LIMIT);
+    // The oldest ones (tab 1's, then the first tabs raised) went first; the latest are all shown.
+    expect(displayed.has(second)).toBe(false); for (const id of tabIds.slice(-NOTICE_LIMIT)) expect(displayed.has(idOf(id)), String(id)).toBe(true);
+  });
+  it('remembers notified identities in a bounded set, forgetting the oldest first', () => {
+    const seen = new Set<string>();
+    for (let index = 0; index < NOTIFIED_LIMIT + 10; index++) remember(seen, `id-${index}`, NOTIFIED_LIMIT);
+    expect(seen.size).toBe(NOTIFIED_LIMIT); expect(seen.has('id-9')).toBe(false); expect(seen.has('id-10')).toBe(true);
+    remember(seen, 'id-10', NOTIFIED_LIMIT); remember(seen, 'new', NOTIFIED_LIMIT); expect(seen.has('id-10')).toBe(true); expect(seen.has('id-11')).toBe(false);
+  });
+  it.each(['manual seen', 'mark all', 'automatic seen', 'navigation', 'tab close', 'revocation', 'service disabled'] as const)('clears the notification on %s', async change => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    const id = idOf(1), other = idOf(2); expect([...displayed.keys()]).toEqual([id, other]);
+    if (change === 'manual seen') activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id);
+    else if (change === 'mark all') activity.acknowledgeAll([byTab(1)!.attention!.id]);
+    else if (change === 'automatic seen') { activity.setAutoAcknowledge(5); await look(1); await keep(5000); expect(byTab(1)!.attention!.acknowledged).toBe(true); }
+    else if (change === 'navigation') activity.updateTab(1, { url: `${tabOf(1).url}/next` }, tabOf(1));
+    else if (change === 'tab close') activity.invalidateTab(1, true);
+    else if (change === 'revocation') activity.revoke('chatgpt-web');
+    else activity.setNotifyProviders([]);
+    await tick();
+    expect(cleared()).toContain(id); expect(displayed.has(id)).toBe(false);
+    // Only that attention's notification goes, unless the change concerns every one.
+    expect(displayed.has(other)).toBe(!['revocation', 'service disabled'].includes(change));
+    // Navigation also ends the run: the page, sampled again at once, still shows that reason as a new attention, notified anew.
+    expect(created()).toHaveLength(2 + Number(change === 'navigation'));
+  });
+  it('a click focuses through the revalidated focus and clears the notification, even when focus fails, without acknowledging', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    const acknowledge = vi.spyOn(activity, 'acknowledge'), focus = vi.spyOn(activity, 'focus');
+    const id = idOf(1), observation = byTab(1)!, samples = vi.mocked(access.sample).mock.calls.length;
+    const clicked = activity.notificationClicked(id); await tick();
+    expect(cleared()).toEqual([id]);
+    await tick(1000); expect(await clicked).toBe('focused');
+    expect(focus).toHaveBeenCalledExactlyOnceWith(observation.id, observation.attention!.id); expect(access.focus).toHaveBeenCalledExactlyOnceWith('chatgpt-web', 1, expect.any(Function));
+    // Focus took its own fresh sample; the attention stays to review: a click is not a seen acknowledgment.
+    expect(vi.mocked(access.sample).mock.calls.length).toBeGreaterThan(samples); expect(byTab(1)!.attention).toEqual(observation.attention); expect(acknowledge).not.toHaveBeenCalled();
+    // The fresh sample shows another attention: focus fails, yet the clicked notification is cleared.
+    const second = idOf(2); evidenceFor.set(2, 'error_visible');
+    const failed = activity.notificationClicked(second); await tick(1000); expect(await failed).toBe('failed');
+    expect(cleared()).toContain(second); expect(access.focus).toHaveBeenCalledOnce(); expect(byTab(2)!.attention!.reason).toBe('error_visible');
+    // Activation itself fails.
+    await raise(1, 'error_visible'); vi.mocked(access.focus).mockRejectedValueOnce(new Error('No tab'));
+    const third = idOf(1), rejected = activity.notificationClicked(third); await tick(1000); expect(await rejected).toBe('failed'); expect(cleared()).toContain(third);
+    expect(acknowledge).not.toHaveBeenCalled(); expect(activity.snapshot().observations.every(item => !item.attention?.acknowledged)).toBe(true);
+  });
+  it('ignores malformed notification IDs, and clears a well-formed one from a previous worker life after a failed focus', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required');
+    const id = idOf(1), uuid = crypto.randomUUID(), samples = vi.mocked(access.sample).mock.calls.length;
+    for (const malformed of ['', 'pilovo:', `pilovo:${uuid}`, `pilovo:${uuid}:x`, `pilovo:${uuid}:${uuid}:extra`, `other:${uuid}:${uuid}`, `PILOVO:${uuid}:${uuid}`, id.toUpperCase(), ` ${id}`, `${id}\n`, 42, null, undefined, { id }]) {
+      expect(await activity.notificationClicked(malformed), JSON.stringify(malformed)).toBe('ignored');
+    }
+    await tick(2000); expect(cleared()).toEqual([]); expect(access.focus).not.toHaveBeenCalled(); expect(vi.mocked(access.sample).mock.calls.length).toBeGreaterThanOrEqual(samples);
+    expect(displayed.has(id)).toBe(true);
+    const stale = noticeId(crypto.randomUUID(), crypto.randomUUID());
+    expect(await activity.notificationClicked(stale)).toBe('failed'); await tick(); expect(cleared()).toEqual([stale]); expect(displayed.has(id)).toBe(true);
+  });
+  it('forgets a notification the user or the system closed, without calling Chrome again', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required');
+    const id = idOf(1); displayed.delete(id); activity.notificationClosed(id); activity.notificationClosed('pilovo:not-ours'); activity.notificationClosed(7);
+    activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id); await tick(); expect(cleared()).toEqual([]);
+  });
+  it('keeps a notification through lapses of its evidence, standing for the same reason raised again in its tab, without notifying twice', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'error_visible');
+    const first = idOf(1), firstAttention = byTab(1)!.attention!.id;
+    // A throttled background tab: its evidence expires, and the next activity alarm samples the same error as a new identity.
+    await tick(ACTIVITY_TTL); expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' }); expect([...displayed.keys()]).toEqual([first]);
+    await tick(10_000); activations.set(1, crypto.randomUUID()); await raise(1, 'error_visible');
+    expect(byTab(1)!.attention!.id).not.toBe(firstAttention); expect(created()).toHaveLength(1); expect(cleared()).toEqual([]); expect([...displayed.keys()]).toEqual([first]);
+    // Lapse after lapse, and a sample without a recognized signal: still that one notification, for the latest identity.
+    for (let round = 0; round < 3; round++) { await tick(ACTIVITY_TTL + 15_000); expect(displayed.has(first)).toBe(true); activations.set(1, crypto.randomUUID()); await raise(1, 'error_visible'); }
+    await raise(1, 'unknown'); expect(displayed.has(first)).toBe(true); await raise(1, 'error_visible');
+    expect(created()).toHaveLength(1); expect(cleared()).toEqual([]); expect([...displayed.keys()]).toEqual([first]);
+    // Seeing the latest identity clears it; the same condition sampled again after another lapse is not notified anew.
+    activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id); await tick(); expect(cleared()).toEqual([first]); expect(displayed.size).toBe(0);
+    await tick(ACTIVITY_TTL); activations.set(1, crypto.randomUUID()); await raise(1, 'error_visible'); expect(created()).toHaveLength(1);
+    // Another reason is new; so is the same reason after observed work.
+    await raise(1, 'input_required'); expect(created()).toHaveLength(2);
+    await raise(1, 'working'); await raise(1, 'input_required'); expect(created()).toHaveLength(3);
+    // A tab closing forgets it: a new tab with the same ID starts afresh.
+    activity.invalidateTab(1, true); activations.set(1, crypto.randomUUID()); await raise(1, 'input_required'); expect(created()).toHaveLength(4);
+    expect(byTab(1)!.attention).toMatchObject({ reason: 'input_required', acknowledged: false });
+  });
+  it.each(['freeze', 'navigation', 'window move'] as const)('notifies the same reason raised again after a %s: it cleared the notification and ends the run', async change => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required');
+    const first = idOf(1); expect(created()).toHaveLength(1);
+    if (change === 'freeze') activity.updateTab(1, { frozen: true });
+    else if (change === 'navigation') activity.updateTab(1, { url: `${tabOf(1).url}/next` }, tabOf(1));
+    // Moving a tab to another window detaches then attaches it, as index.ts relays those events.
+    else { activity.invalidateTab(1); activity.invalidateTab(1); }
+    await tick(); expect(cleared()).toEqual([first]); expect(displayed.size).toBe(0);
+    // The page shows the same reason again: a new attention identity to review, notified like any other.
+    activations.set(1, crypto.randomUUID()); await raise(1, 'input_required');
+    expect(byTab(1)!.attention).toMatchObject({ reason: 'input_required', acknowledged: false });
+    expect(created()).toHaveLength(2); expect([...displayed.keys()]).toEqual([idOf(1)]);
+  });
+  it('clears a lapsed notification when its grace period ends without the same reason, or at once on other evidence or settings', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    const id = idOf(1), other = idOf(2), deadline = byTab(1)!.validUntil;
+    // Tab 2 keeps being sampled; tab 1 is not sampled again after its evidence expires.
+    await keep(deadline + NOTICE_GRACE - 500 - now, [2]); expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' }); expect(displayed.has(id)).toBe(true);
+    await keep(1500, [2]); expect(displayed.has(id)).toBe(false); expect(cleared()).toEqual([id]); expect(displayed.has(other)).toBe(true);
+    // The same reason sampled after the grace period is the same run: not notified again.
+    activations.set(1, crypto.randomUUID()); await raise(1, 'input_required'); expect(created()).toHaveLength(2);
+    // During a lapse, observed work, another reason, navigation or the service leaving the setting clears it at once.
+    for (const change of ['working', 'error_visible', 'navigation', 'service disabled'] as const) {
+      activity.setNotifyProviders(['chatgpt-web']); await raise(2, 'working'); await raise(2, 'input_required');
+      const lapsed = idOf(2), shown = created().length; await tick(ACTIVITY_TTL); expect(displayed.has(lapsed), change).toBe(true);
+      if (change === 'navigation') activity.updateTab(2, { url: `${tabOf(2).url}/next` }, tabOf(2));
+      else if (change === 'service disabled') activity.setNotifyProviders([]);
+      else await raise(2, change);
+      await tick(); expect(displayed.has(lapsed), change).toBe(false); expect(cleared()).toContain(lapsed);
+      // Another reason is a new attention, and so is the same reason sampled after navigation, which ends the run: notified in its place.
+      expect(created().length, change).toBe(shown + Number(change === 'error_visible' || change === 'navigation'));
+    }
+  });
+  it('a click on a notification that outlived a lapse focuses the attention it now stands for, sampling the tab first while it is lapsed', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required');
+    const acknowledge = vi.spyOn(activity, 'acknowledge'), focus = vi.spyOn(activity, 'focus');
+    // Rebound after a lapse: the ID still names the first identity, the click focuses the current one.
+    const id = idOf(1); await tick(ACTIVITY_TTL + 5000); activations.set(1, crypto.randomUUID()); await raise(1, 'input_required');
+    const rebound = byTab(1)!; expect(rebound.attention!.id).not.toBe(parseNoticeId(id)!.attentionId); expect([...displayed.keys()]).toEqual([id]);
+    let clicked = activity.notificationClicked(id); await tick(); expect(cleared()).toEqual([id]);
+    await tick(1000); expect(await clicked).toBe('focused'); expect(focus).toHaveBeenLastCalledWith(rebound.id, rebound.attention!.id);
+    // Lapsed when clicked: the tab is sampled at once; the same reason raised again there is focused through focus().
+    await raise(1, 'working'); await raise(1, 'error_visible'); const second = idOf(1); await tick(ACTIVITY_TTL); expect(displayed.has(second)).toBe(true);
+    const samples = vi.mocked(access.sample).mock.calls.length; activations.set(1, crypto.randomUUID());
+    clicked = activity.notificationClicked(second); await tick(); expect(cleared()).toContain(second); expect(vi.mocked(access.sample).mock.calls.length).toBe(samples + 1);
+    await tick(1000); expect(await clicked).toBe('focused');
+    const current = byTab(1)!; expect(focus).toHaveBeenLastCalledWith(current.id, current.attention!.id); expect(current.attention).toMatchObject({ reason: 'error_visible', acknowledged: false });
+    expect(access.focus).toHaveBeenCalledTimes(2); expect(created()).toHaveLength(2);
+    // The fresh sample shows something else, or no sample comes back in time: nothing is focused, the notification is cleared.
+    await raise(1, 'input_required'); const third = idOf(1); await tick(ACTIVITY_TTL); evidenceFor.set(1, 'working');
+    clicked = activity.notificationClicked(third); await tick(); await tick(1000); expect(await clicked).toBe('failed'); expect(cleared()).toContain(third);
+    await raise(1, 'error_visible'); const fourth = idOf(1); await tick(ACTIVITY_TTL);
+    vi.mocked(access.tab).mockImplementation(async tabId => ({ ...tabOf(tabId), frozen: true }));
+    clicked = activity.notificationClicked(fourth); await tick(NOTICE_RESAMPLE - 1); expect(cleared()).toContain(fourth);
+    await tick(1); expect(await clicked).toBe('failed');
+    expect(access.focus).toHaveBeenCalledTimes(2); expect(acknowledge).not.toHaveBeenCalled();
+  });
+  it('forgets every notification when the permission is removed elsewhere, though Chrome then refuses to clear them, and clears what is left once granted again', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
+    const ids = [idOf(1), idOf(2)];
+    // As in Chrome: once the permission is gone, notification calls are refused.
+    permitted = false; vi.mocked(access.clearNotification).mockRejectedValue(new Error("'notifications.clear' is not available in this context"));
+    activity.notificationsRevoked(); await tick();
+    expect(cleared()).toEqual(ids); expect([...displayed.keys()]).toEqual(ids);
+    // Nothing is notified without it, and later changes do not try those clears again.
+    await raise(1, 'working'); await raise(1, 'error_visible'); activity.acknowledge(byTab(2)!.id, byTab(2)!.attention!.id); await tick();
+    expect(created()).toHaveLength(2); expect(cleared()).toEqual(ids);
+    // Granted again: what Chrome still lists from before is cleared, other extensions' notifications are not touched.
+    permitted = true; vi.mocked(access.clearNotification).mockImplementation(async id => { displayed.delete(id); });
+    vi.mocked(access.shownNotifications).mockImplementation(async () => [...displayed.keys(), 'other-notification']);
+    activity.notificationsGranted(); await tick(); expect(displayed.size).toBe(0); expect(cleared().slice(2)).toEqual(ids);
+  });
+  it('clears notifications a previous worker life left, once, and never shows them again', async () => {
+    const left = noticeId(crypto.randomUUID(), crypto.randomUUID());
+    vi.mocked(access.shownNotifications).mockResolvedValue([left, 'other-notification']);
+    activity = new WebActivity(access); await tick();
+    expect(cleared()).toEqual([left]); expect(created()).toEqual([]);
+    // Chrome cannot list them (permission not granted): nothing happens and no rejection escapes.
+    vi.mocked(access.shownNotifications).mockRejectedValue(new Error('requires permission')); activity = new WebActivity(access); await tick(); expect(cleared()).toEqual([left]);
+  });
+  it('drops a notification Chrome failed to create, so a later change does not try to clear it', async () => {
+    activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick();
+    vi.mocked(access.showNotification).mockRejectedValueOnce(new Error('requires permission')); await raise(1, 'input_required');
+    activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id); await tick(); expect(cleared()).toEqual([]);
   });
 });

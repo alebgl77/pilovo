@@ -32,13 +32,19 @@ try {
   let ui = await context.newPage(); await ui.goto(`chrome-extension://${extensionId}/index.html`);
   assert.deepEqual((await rpc(ui, { method: 'getWebActivity' })).observations, []);
   assert.equal((await rpc(ui, { method: 'getWebDiscovery' })).permission, 'not-granted');
-  record('production extension starts without host grants or observations');
+  // OS notifications are optional: not granted at install, and Chrome exposes no notifications API until they are.
+  assert.equal(await ui.evaluate(() => chrome.permissions.contains({ permissions: ['notifications'] })), false);
+  assert.equal(await ui.evaluate(() => typeof chrome.notifications), 'undefined');
+  assert.deepEqual((await rpc(ui, { method: 'getSnapshot' })).settings.notifyProviders, []);
+  record('production extension starts without host grants, the notifications permission or observations');
   // The separate fixture changes only the host permission declaration. Optional prompt/revoke remain unit/manual gates.
   await context.close();
   extensionDirectory = path.join(run, 'required-host-fixture'); profileDirectory = path.join(run, 'fixture-profile');
   await cp(path.join(root, 'dist'), extensionDirectory, { recursive: true });
   const fixtureManifest = JSON.parse(await readFile(path.join(extensionDirectory, 'manifest.json'), 'utf8'));
   fixtureManifest.host_permissions = ['https://chatgpt.com/*']; fixtureManifest.optional_host_permissions = ['https://claude.ai/*'];
+  // Also test-only: notifications declared as required, since headless Chromium cannot answer a permission prompt.
+  fixtureManifest.permissions = [...fixtureManifest.permissions, 'notifications']; delete fixtureManifest.optional_permissions;
   await writeFile(path.join(extensionDirectory, 'manifest.json'), JSON.stringify(fixtureManifest));
   context = await launch(); context.setDefaultTimeout(15000);
   await context.route('https://**/*', route => route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: route.request().url().startsWith('https://claude.ai/') ? claude() : gpt() }));
@@ -64,15 +70,87 @@ try {
   await expect.poll(states).toEqual(['attention']);
   const observation = (await activity()).observations[0]; assert.equal(observation.attention.reason, 'response_ready');
   await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('1');
+  // Response ready: brand olive with white text; the default French settings word the title.
+  assert.deepEqual(await ui.evaluate(() => chrome.action.getBadgeBackgroundColor({})), [75, 93, 58, 255]);
+  assert.deepEqual(await ui.evaluate(() => chrome.action.getBadgeTextColor({})), [255, 255, 255, 255]);
+  await expect.poll(() => ui.evaluate(() => chrome.action.getTitle({}))).toBe('Pilovo — 1 à vérifier (réponse disponible)');
   const exportText = JSON.stringify(await rpc(ui, { method: 'exportData' }));
   assert.ok(!exportText.includes(canary)); assert.ok(!JSON.stringify(await activity()).includes(canary));
   record('observed work plus two positive completion reads create one metadata-only attention and badge');
+
+  // Tab-level identity: the worker's number, Chrome's real tab position after a move, and a memory-only label.
+  const labelCanary = 'PRIVATE_LABEL_CANARY';
+  assert.equal(observation.sessionNumber, 1); assert.ok(Number.isInteger(observation.tabIndex) && observation.tabIndex >= 0, JSON.stringify(observation));
+  assert.equal((await rpcResult(ui, { method: 'labelWebActivity', id: observation.id, label: 'Revue\u202Econtrat' })).ok, false);
+  await rpc(ui, { method: 'labelWebActivity', id: observation.id, label: `  ${labelCanary}  ` });
+  assert.equal((await activity()).observations[0].label, labelCanary);
+  await ui.evaluate(id => chrome.tabs.move(id, { index: 0 }), observation.tabId);
+  await expect.poll(async () => (await activity()).observations[0]?.tabIndex).toBe(0);
+  assert.equal((await activity()).observations[0].id, observation.id);
+  assert.ok(!JSON.stringify(await rpc(ui, { method: 'exportData' })).includes(labelCanary));
+  assert.ok(!(await ui.evaluate(() => chrome.action.getTitle({}))).includes(labelCanary));
+  record('stable session number, real tab position after a move and a memory-only label absent from export and badge title');
 
   await rpc(ui, { method: 'focusWebActivity', id: observation.id });
   assert.equal(await ui.evaluate(async () => (await chrome.tabs.query({ active: true }))[0].id), observation.tabId);
   await rpc(ui, { method: 'acknowledgeWebActivity', id: observation.id, attentionId: observation.attention.id });
   await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  await expect.poll(() => ui.evaluate(() => chrome.action.getTitle({}))).toBe('Pilovo');
   record('focus revalidates ephemeral row and acknowledgement clears its badge');
+
+  // Optional automatic seen, read through the real Chrome window and tab APIs (no tabs permission): off by default; on,
+  // an attention on the active tab of the focused window is seen after the delay, never one behind the extension page.
+  const complete = async () => {
+    await provider.evaluate(() => document.querySelector('form button').setAttribute('aria-label', 'Arrêter'));
+    await expect.poll(states).toEqual(['working']);
+    // A new completion: the announcer's text node is replaced, as the provider does when a newer answer ends.
+    await provider.evaluate(() => { document.querySelector('form button').setAttribute('aria-label', 'Démarrer une conversation vocale'); document.querySelector('span[role="status"]').textContent = 'Réponse terminée'; });
+    await expect.poll(states).toEqual(['attention']);
+  };
+  const seenNow = async () => (await activity()).observations[0]?.attention?.acknowledged;
+  assert.equal((await rpc(ui, { method: 'getSnapshot' })).settings.autoAcknowledgeSeconds, 0);
+  assert.equal((await rpcResult(ui, { method: 'updateSettings', patch: { autoAcknowledgeSeconds: 10 } })).ok, false);
+  await provider.bringToFront(); await complete();
+  await new Promise(resolve => setTimeout(resolve, 6500)); assert.equal(await seenNow(), false);
+  assert.equal((await rpc(ui, { method: 'updateSettings', patch: { autoAcknowledgeSeconds: 5 } })).autoAcknowledgeSeconds, 5);
+  const enabled = Date.now();
+  await expect.poll(seenNow, { timeout: 12000, intervals: [250] }).toBe(true);
+  assert.ok(Date.now() - enabled >= 4500, `seen after ${Date.now() - enabled} ms`);
+  await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  await ui.bringToFront(); await complete();
+  await new Promise(resolve => setTimeout(resolve, 7000)); assert.equal(await seenNow(), false);
+  assert.equal(await ui.evaluate(() => chrome.action.getBadgeText({})), '1');
+  // Switching to the provider tab (a real tab activation) starts the dwell: seen after the delay, counted from the switch.
+  await provider.bringToFront(); const switched = Date.now();
+  await expect.poll(seenNow, { timeout: 12000, intervals: [250] }).toBe(true);
+  assert.ok(Date.now() - switched >= 4500, `seen ${Date.now() - switched} ms after the switch`);
+  await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  // Off again: a new attention on the viewed tab stays to review until seen by hand.
+  assert.equal((await rpc(ui, { method: 'updateSettings', patch: { autoAcknowledgeSeconds: 0 } })).autoAcknowledgeSeconds, 0);
+  await complete(); await new Promise(resolve => setTimeout(resolve, 6500)); assert.equal(await seenNow(), false);
+  const pendingSeen = (await activity()).observations[0];
+  await rpc(ui, { method: 'acknowledgeWebActivity', id: pendingSeen.id, attentionId: pendingSeen.attention.id });
+  await expect.poll(() => ui.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  record('optional automatic seen: off by default, then after the delay on the active tab of the focused window only');
+
+  // Optional OS notifications through the real chrome.notifications API (headless Chromium supports it): none while off,
+  // none for the tab in front, one for a tab behind the extension page, cleared by seen. Content is unit-tested; Chrome
+  // lists IDs only here.
+  const notices = async () => Object.keys(await ui.evaluate(() => chrome.notifications.getAll()));
+  assert.deepEqual(await notices(), []);
+  assert.equal((await rpcResult(ui, { method: 'updateSettings', patch: { notifyProviders: ['chatgpt-web', 'chatgpt-web'] } })).ok, false);
+  assert.deepEqual((await rpc(ui, { method: 'updateSettings', patch: { notifyProviders: ['chatgpt-web'] } })).notifyProviders, ['chatgpt-web']);
+  await provider.bringToFront(); await complete();
+  await new Promise(resolve => setTimeout(resolve, 1500)); assert.deepEqual(await notices(), []);
+  await ui.bringToFront(); await complete();
+  const notified = (await activity()).observations[0];
+  await expect.poll(notices).toEqual([`pilovo:${notified.id}:${notified.attention.id}`]);
+  assert.equal((await activity()).observations[0].attention.acknowledged, false);
+  await rpc(ui, { method: 'acknowledgeWebActivity', id: notified.id, attentionId: notified.attention.id });
+  await expect.poll(notices).toEqual([]);
+  assert.deepEqual((await rpc(ui, { method: 'updateSettings', patch: { notifyProviders: [] } })).notifyProviders, []);
+  await provider.bringToFront();
+  record('optional OS notifications (test-only required permission): none for the tab in front, one for a tab behind, cleared by seen');
 
   await provider.evaluate(() => document.querySelector('form button').setAttribute('aria-label', 'Arrêter'));
   await expect.poll(states).toEqual(['working']);
@@ -82,7 +160,9 @@ try {
 
   await provider.reload(); await expect.poll(states).toEqual(['idle']);
   assert.equal((await rpcResult(ui, { method: 'focusWebActivity', id: observation.id })).ok, false);
-  record('same-URL reload destroys prior identity and work witness');
+  const reloaded = (await activity()).observations[0];
+  assert.notEqual(reloaded.id, observation.id); assert.equal(reloaded.sessionNumber, 1); assert.equal(reloaded.label, labelCanary);
+  record('same-URL reload destroys prior identity and work witness but keeps the tab session number and label');
 
   // Exercise the exact evidence module in real DOM fixtures, including current FR markup.
   const built = await build({ entryPoints: [path.join(root, 'src/content/evidence.ts')], bundle: true, format: 'iife', globalName: 'FixtureEvidence', write: false, platform: 'browser' });
@@ -110,7 +190,9 @@ try {
   // With every product UI closed, the worker still updates the action badge.
   await ui.close();
   await provider.evaluate(() => document.querySelector('form button').setAttribute('aria-label', 'Stop generating'));
-  await expect.poll(() => worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  // Work with nothing to review shows the working mark, not a count.
+  await expect.poll(() => worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('…');
+  await expect.poll(() => worker.evaluate(() => chrome.action.getTitle({}))).toBe('Pilovo — 1 en cours');
   await new Promise(resolve => setTimeout(resolve, 2200));
   await provider.evaluate(() => {
     document.querySelector('form button').setAttribute('aria-label', 'Start voice mode');
@@ -123,10 +205,10 @@ try {
   await expect.poll(async () => (await rpc(reopened, { method: 'getWebActivity' })).observations).toEqual([]);
   await expect.poll(() => reopened.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
   record('closing the observed tab removes observations and clears badge');
-  assert.ok(!JSON.stringify(await rpc(reopened, { method: 'exportData' })).includes(canary));
+  assert.ok(!JSON.stringify(await rpc(reopened, { method: 'exportData' })).includes(canary)); assert.ok(!JSON.stringify(await rpc(reopened, { method: 'exportData' })).includes(labelCanary));
 } catch (error) { failures.push(String(error)); console.error(error); process.exitCode = 1; }
 finally {
   await context?.close();
-  const evidence = { checks, failures, limitations: ['Synthetic HTTPS fixtures only: no authenticated provider session or provider execution.', 'Production manifest no-grant phase is exact. Activity phase uses a TEST-ONLY clone declaring ChatGPT as required host; optional grant prompt and revocation remain unit/manual gates because headless prompt stays pending.', 'Worker termination/restart and browser-delayed badge expiry are covered by unit lifecycle tests, not a hard wall-clock guarantee.'] };
+  const evidence = { checks, failures, limitations: ['Synthetic HTTPS fixtures only: no authenticated provider session or provider execution.', 'Production manifest no-grant phase is exact. Activity phase uses a TEST-ONLY clone declaring ChatGPT as required host and notifications as a required permission; optional grant prompts, revocation and notification clicks remain unit/manual gates because headless prompts stay pending and Chrome offers no API to click a notification.', 'Worker termination/restart and browser-delayed badge expiry are covered by unit lifecycle tests, not a hard wall-clock guarantee.'] };
   await writeFile(path.join(run, 'evidence.json'), JSON.stringify(evidence, null, 2)); console.log(`Evidence: ${path.join(run, 'evidence.json')}`);
 }

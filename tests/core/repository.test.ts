@@ -1,9 +1,12 @@
 import 'fake-indexeddb/auto';
+import { openDB } from 'idb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HubRepository, LIMITS } from '../../src/domain/repository';
 import { eventSchema, taskKey } from '../../src/shared/protocol';
 import type { AgentEvent, SourceId } from '../../src/shared/types';
 import { hashFile, MAX_VERIFICATION_BYTES } from '../../src/domain/verification';
+import { DEFAULT_SETTINGS } from '../../src/shared/defaults';
+import { rpcSchema } from '../../src/shared/rpc';
 
 const now = Date.parse('2026-10-09T00:00:00.000Z');
 const repos: HubRepository[] = [];
@@ -56,4 +59,82 @@ describe('local artifact verification',()=>{
   it('checks the SHA256 known vector without retaining file content or global success',async()=>{const db=repo();await db.ingest('claude-code',event());const evidence=await hashFile(new File(['abc'],'result.txt'),reference);expect(evidence.actualSha256).toBe(reference);const check=await db.recordVerification(key,evidence);expect(check.passed).toBe(true);expect((await db.getTask(key)).verification.status).toBe('unverified');expect((await db.exportData()).tasks[0].verificationChecks[0]).toMatchObject({method:'sha256',referenceProvenance:'user_supplied',byteSize:3});});
   it('records mismatches explicitly and keeps human review independent',async()=>{const db=repo();await db.ingest('claude-code',event());const evidence=await hashFile(new File(['abcd'],'result.txt'),reference);expect((await db.recordVerification(key,evidence)).passed).toBe(false);expect((await db.getTask(key)).review.status).toBe('pending');});
   it('rejects oversized file before reading bytes and malformed reference',async()=>{const file={size:MAX_VERIFICATION_BYTES+1,arrayBuffer:vi.fn()} as unknown as File;await expect(hashFile(file,reference)).rejects.toMatchObject({code:'validation.invalid'});expect(file.arrayBuffer).not.toHaveBeenCalled();await expect(hashFile(new File(['abc'],'x'),'xyz')).rejects.toMatchObject({code:'validation.invalid'});});
+});
+
+describe('automatic seen preference', () => {
+  // Exactly what 0.4.0 stored: every preference except the one added later.
+  const legacy = { language: 'en', theme: 'dark', retentionDays: 7, retainPrompts: true, notifications: false, bridgeEnabled: true };
+  const store = async (name: string, value: unknown) => { const raw = await openDB(name); await raw.put('meta', { key: 'settings', value }); raw.close(); };
+  const stored = async (name: string) => { const raw = await openDB(name); const row = await raw.get('meta', 'settings'); raw.close(); return row?.value; };
+  it('is off by default in a fresh profile, its snapshot and its export', async () => {
+    const db = repo();
+    expect(DEFAULT_SETTINGS.autoAcknowledgeSeconds).toBe(0);
+    expect((await db.snapshot()).settings).toEqual(DEFAULT_SETTINGS); expect((await db.exportData()).settings.autoAcknowledgeSeconds).toBe(0);
+  });
+  it('merges settings stored by an older version over the defaults on every read, without a migration', async () => {
+    const name = crypto.randomUUID(), db = repo(name); await db.snapshot(); await store(name, legacy);
+    const expected = { ...legacy, bridgeEnabled: false, autoAcknowledgeSeconds: 0, notifyProviders: [] };
+    expect((await db.snapshot()).settings).toEqual(expected);
+    expect((await db.exportData())).toMatchObject({ schemaVersion: 2, settings: expected });
+    // Retention and prompt reads keep working on the old record.
+    await db.cleanup(); await db.ingest('claude-code', event({ payload: { prompt: 'KEPT' } })); expect((await db.getTask(key)).prompt).toBe('KEPT');
+    expect(await stored(name)).toEqual(legacy);
+    // The next write completes the stored record; nothing else changes.
+    expect(await db.updateSettings({ theme: 'light' })).toEqual({ ...expected, theme: 'light' });
+    expect(await stored(name)).toEqual({ ...expected, theme: 'light' });
+    // An unexpected stored value is read as off, and replaced on the next write.
+    for (const value of [10, -1, '5', null, 5.5]) {
+      await store(name, { ...legacy, autoAcknowledgeSeconds: value });
+      expect((await db.snapshot()).settings.autoAcknowledgeSeconds, JSON.stringify(value)).toBe(0); expect((await db.exportData()).settings.autoAcknowledgeSeconds).toBe(0);
+    }
+    expect((await db.updateSettings({ language: 'fr' })).autoAcknowledgeSeconds).toBe(0); expect(await stored(name)).toMatchObject({ autoAcknowledgeSeconds: 0 });
+  });
+  it('accepts only 0, 5, 15 or 30 seconds, keeps the choice across restarts and carries it in the export', async () => {
+    const name = crypto.randomUUID(), db = repo(name);
+    for (const seconds of [5, 15, 30, 0, 15] as const) expect((await db.updateSettings({ autoAcknowledgeSeconds: seconds })).autoAcknowledgeSeconds).toBe(seconds);
+    for (const invalid of [10, -1, 1, 60, 5.5, '5', '15', null, true, NaN, Infinity]) {
+      await expect(db.updateSettings({ autoAcknowledgeSeconds: invalid as never }), JSON.stringify(invalid)).rejects.toMatchObject({ code: 'validation.invalid' });
+      expect(rpcSchema.safeParse({ method: 'updateSettings', patch: { autoAcknowledgeSeconds: invalid } }).success, JSON.stringify(invalid)).toBe(false);
+    }
+    for (const seconds of [0, 5, 15, 30]) expect(rpcSchema.safeParse({ method: 'updateSettings', patch: { autoAcknowledgeSeconds: seconds } }).success).toBe(true);
+    expect(rpcSchema.safeParse({ method: 'updateSettings', patch: { autoAcknowledgeSeconds: 5, autoAcknowledge: true } }).success).toBe(false);
+    const restarted = repo(name);
+    expect((await restarted.snapshot()).settings.autoAcknowledgeSeconds).toBe(15); expect((await restarted.exportData()).settings.autoAcknowledgeSeconds).toBe(15);
+    // Purge keeps preferences, this one included.
+    await restarted.purgeAll(); expect((await restarted.snapshot()).settings.autoAcknowledgeSeconds).toBe(15);
+  });
+});
+
+describe('optional OS notification services preference', () => {
+  const legacy = { language: 'en', theme: 'dark', retentionDays: 7, retainPrompts: true, notifications: false, bridgeEnabled: true, autoAcknowledgeSeconds: 15 };
+  const store = async (name: string, value: unknown) => { const raw = await openDB(name); await raw.put('meta', { key: 'settings', value }); raw.close(); };
+  const stored = async (name: string) => { const raw = await openDB(name); const row = await raw.get('meta', 'settings'); raw.close(); return row?.value; };
+  it('is empty by default, and settings stored before it existed read as empty without a migration', async () => {
+    expect(DEFAULT_SETTINGS.notifyProviders).toEqual([]);
+    const fresh = repo(); expect((await fresh.snapshot()).settings.notifyProviders).toEqual([]); expect((await fresh.exportData()).settings.notifyProviders).toEqual([]);
+    const name = crypto.randomUUID(), db = repo(name); await db.snapshot(); await store(name, legacy);
+    expect((await db.snapshot()).settings).toEqual({ ...legacy, bridgeEnabled: false, notifyProviders: [] }); expect(await stored(name)).toEqual(legacy);
+    // Unexpected stored values read as empty and are replaced on the next write; the legacy notifications flag is untouched.
+    for (const value of [['claude-web', 'claude-web'], ['other-web'], 'claude-web', null, 1, [true]]) {
+      await store(name, { ...legacy, notifyProviders: value });
+      expect((await db.snapshot()).settings.notifyProviders, JSON.stringify(value)).toEqual([]); expect((await db.exportData()).settings.notifyProviders).toEqual([]);
+    }
+    expect(await db.updateSettings({ theme: 'light' })).toMatchObject({ notifyProviders: [], notifications: false, autoAcknowledgeSeconds: 15 }); expect(await stored(name)).toMatchObject({ notifyProviders: [] });
+    // The shared default is never mutated through a returned settings object.
+    (await db.snapshot()).settings.notifyProviders.push('claude-web'); expect(DEFAULT_SETTINGS.notifyProviders).toEqual([]);
+  });
+  it('accepts only a list of distinct services, keeps it across restarts and purge, and carries it in the export', async () => {
+    const name = crypto.randomUUID(), db = repo(name);
+    for (const value of [['claude-web'], ['chatgpt-web', 'claude-web'], [], ['chatgpt-web']] as const) expect((await db.updateSettings({ notifyProviders: [...value] })).notifyProviders).toEqual(value);
+    for (const invalid of [['claude-web', 'claude-web'], ['claude-web', 'chatgpt-web', 'chatgpt-web'], ['claude-code'], ['codex'], ['CLAUDE-WEB'], 'claude-web', null, true, 1, [1], [null], { 0: 'claude-web' }]) {
+      await expect(db.updateSettings({ notifyProviders: invalid as never }), JSON.stringify(invalid)).rejects.toMatchObject({ code: 'validation.invalid' });
+      expect(rpcSchema.safeParse({ method: 'updateSettings', patch: { notifyProviders: invalid } }).success, JSON.stringify(invalid)).toBe(false);
+    }
+    expect(rpcSchema.safeParse({ method: 'updateSettings', patch: { notifyProviders: ['claude-web'], notifyAll: true } }).success).toBe(false);
+    // The legacy native-agent flag stays refused: the new setting does not reopen it.
+    await expect(db.updateSettings({ notifications: true })).rejects.toMatchObject({ code: 'validation.invalid' });
+    const restarted = repo(name);
+    expect((await restarted.snapshot()).settings.notifyProviders).toEqual(['chatgpt-web']); expect((await restarted.exportData()).settings.notifyProviders).toEqual(['chatgpt-web']);
+    await restarted.purgeAll(); expect((await restarted.snapshot()).settings.notifyProviders).toEqual(['chatgpt-web']);
+  });
 });

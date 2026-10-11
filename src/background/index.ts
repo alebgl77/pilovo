@@ -1,9 +1,10 @@
 import { HubRepository } from '../domain/repository';
 import { errorCode, HubError } from '../shared/errors';
 import { rpcSchema, type RpcRequest } from '../shared/rpc';
-import type { ApiResult } from '../shared/types';
+import type { ApiResult, Settings } from '../shared/types';
 import { chromeWebBrowser, WebBrowser } from '../platform/web';
 import { WebActivity, chromeActivityAccess } from './activity';
+import { NOTIFICATION_PERMISSION } from './activity-notifications';
 import { WEB_PROVIDERS } from '../shared/web';
 
 const repository = new HubRepository();
@@ -12,12 +13,26 @@ let notifyTimer: ReturnType<typeof setTimeout> | undefined;
 const notify = () => { if (notifyTimer) return; notifyTimer = setTimeout(() => { notifyTimer = undefined; void chrome.runtime.sendMessage({ channel: 'hub.changed' }).catch(() => undefined); }, 200); };
 const activity = new WebActivity(chromeActivityAccess((provider, tabId, current) => web.open(provider, tabId, current), notify));
 const invalidateDiscovery = () => { web.invalidate(); notify(); };
+// The toolbar title and notification text follow the app's language setting, automatic seen its delay and OS notifications
+// their services (both off by default). A reply applies only if no newer call has applied yet, so an older call resolving
+// late cannot restore its values. updateSettings can reject after its settings write committed (the retention cleanup
+// that follows is a separate write), so a failed call re-reads the persisted settings. A change of services replies once
+// the clears it caused have reached Chrome (2 s at most): unchecking the last service then removes the permission, after
+// which Chrome refuses to clear anything.
+let settingsCalls = 0, settingsApplied = 0;
+const applySettings = (call: number, settings: Settings) => { if (call > settingsApplied) { settingsApplied = call; activity.setLanguage(settings.language); activity.setAutoAcknowledge(settings.autoAcknowledgeSeconds); activity.setNotifyProviders(settings.notifyProviders); } };
+const updateSettings = async (patch: Partial<Settings>) => {
+  const call = ++settingsCalls;
+  try { const settings = await repository.updateSettings(patch); applySettings(call, settings); if (patch.notifyProviders) await Promise.race([activity.noticesSettled(), new Promise(resolve => setTimeout(resolve, 2_000))]); return settings; }
+  catch (error) { await repository.snapshot().then(snapshot => applySettings(call, snapshot.settings), () => undefined); throw error; }
+};
 async function dispatch(request: RpcRequest): Promise<unknown> {
   switch (request.method) {
     case 'getWebActivity': return activity.snapshot();
     case 'focusWebActivity': return activity.focus(request.id);
     case 'acknowledgeWebActivity': return activity.acknowledge(request.id, request.attentionId);
     case 'acknowledgeAllWebActivity': return activity.acknowledgeAll(request.attentionIds);
+    case 'labelWebActivity': return activity.label(request.id, request.label);
     case 'getWebDiscovery': return web.discovery();
     case 'openWebProvider': return web.open(request.provider, request.tabId);
     case 'createWebPreparation': return repository.createWebPreparation(request.input);
@@ -33,7 +48,7 @@ async function dispatch(request: RpcRequest): Promise<unknown> {
     case 'assignTask': return repository.assignTask(request.key, request.missionId);
     case 'reviewTask': return repository.reviewTask(request.key, request.status, request.comment);
     case 'recordVerification': return repository.recordVerification(request.key, request.evidence);
-    case 'updateSettings': return repository.updateSettings(request.patch);
+    case 'updateSettings': return updateSettings(request.patch);
     case 'deleteTask': return repository.deleteTask(request.key);
     case 'deleteMission': return repository.deleteMission(request.id, request.deleteTasks);
     case 'purgeAll': return repository.purgeAll();
@@ -42,7 +57,7 @@ async function dispatch(request: RpcRequest): Promise<unknown> {
   }
 }
 const ready = (async () => {
-  await repository.updateSettings({ bridgeEnabled: false });
+  await updateSettings({ bridgeEnabled: false });
   await repository.setBridgeStatus('disabled');
   await repository.setConnection('claude-code', 'disconnected'); await repository.setConnection('codex', 'disconnected');
   await chrome.alarms.create('hub-maintenance', { periodInMinutes: 1 });
@@ -58,16 +73,47 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond: (respon
   void ready.then(() => dispatch(parsed.data)).then(data => { respond({ ok: true, data }); if (!['getSnapshot', 'getTaskEvents', 'exportData', 'getAgentDetection', 'getWebDiscovery', 'getWebActivity'].includes(parsed.data.method)) notify(); }).catch(error => { const code = errorCode(error); respond({ ok: false, error: { code, message: code } }); });
   return true;
 });
-chrome.permissions.onRemoved.addListener(permission => { invalidateDiscovery(); for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) activity.revoke(provider.id); });
-chrome.permissions.onAdded.addListener(permission => { invalidateDiscovery(); for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) activity.reconcile(provider.id); });
-chrome.tabs.onCreated.addListener(tab => { invalidateDiscovery(); if (tab.id !== undefined) activity.updateTab(tab.id, {}, tab); });
-chrome.tabs.onRemoved.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId, true); });
+// Optional OS notifications (off by default). chrome.notifications is absent until its optional permission is granted, so
+// click and close listeners are added at startup when it is, or as soon as the user grants it. A click focuses through
+// the ordinary revalidation and is never a seen acknowledgment. Once the permission is removed, Chrome refuses notification
+// calls: the worker forgets its notifications, and clears any left on screen when the permission is granted again.
+let noticesHeard = false;
+const hearNotices = () => {
+  if (noticesHeard || !chrome.notifications?.onClicked) return;
+  noticesHeard = true;
+  chrome.notifications.onClicked.addListener(id => { void ready.then(() => activity.notificationClicked(id)).catch(() => undefined); });
+  chrome.notifications.onClosed.addListener(id => { activity.notificationClosed(id); });
+};
+hearNotices();
+chrome.permissions.onRemoved.addListener(permission => {
+  invalidateDiscovery();
+  for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) activity.revoke(provider.id);
+  if (permission.permissions?.includes(NOTIFICATION_PERMISSION)) activity.notificationsRevoked();
+});
+// A grant that reaches a waking worker starts observing once the stored settings apply, like the activity alarm below.
+chrome.permissions.onAdded.addListener(permission => {
+  invalidateDiscovery();
+  for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) void ready.catch(() => undefined).then(() => activity.reconcile(provider.id));
+  if (permission.permissions?.includes(NOTIFICATION_PERMISSION)) { hearNotices(); activity.notificationsGranted(); }
+});
+// Opening, closing, moving, attaching or detaching a tab shifts its neighbors' positions: observed rows re-read theirs.
+chrome.tabs.onCreated.addListener(tab => { invalidateDiscovery(); if (tab.id !== undefined) activity.updateTab(tab.id, {}, tab); void activity.reindex(); });
+chrome.tabs.onRemoved.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId, true); void activity.reindex(); });
 chrome.tabs.onUpdated.addListener((tabId, change, tab) => { invalidateDiscovery(); activity.updateTab(tabId, change, tab); });
-chrome.tabs.onAttached.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.refresh(); });
-chrome.tabs.onDetached.addListener(tabId => { invalidateDiscovery(); activity.invalidateTab(tabId); });
-chrome.tabs.onReplaced.addListener((added, removed) => { invalidateDiscovery(); activity.invalidateTab(removed, true); activity.invalidateTab(added, true); void activity.refresh(); });
+// A move within a window changes only positions, never evidence or the session, so rows keep their state.
+chrome.tabs.onMoved.addListener(() => { void activity.reindex(); });
+chrome.tabs.onAttached.addListener((tabId, info) => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.refresh(); void activity.reindex(); activity.tabViewChanged(tabId, info.newWindowId); });
+chrome.tabs.onDetached.addListener((tabId, info) => { invalidateDiscovery(); activity.invalidateTab(tabId); void activity.reindex(); activity.tabViewChanged(tabId, info.oldWindowId); });
+chrome.tabs.onReplaced.addListener((added, removed) => { invalidateDiscovery(); activity.invalidateTab(removed, true); activity.invalidateTab(added, true); void activity.refresh(); activity.viewChanged(); });
+// Optional automatic seen (off by default) follows what the user looks at: the active tab of Chrome's focused window.
+// These events only stop any dwell and, when the setting is on, trigger a fresh query; WINDOW_ID_NONE: Chrome lost focus.
+// A tab event that touches neither the viewed tab nor its window leaves a running dwell alone.
+chrome.tabs.onActivated.addListener(info => { activity.tabViewChanged(info.tabId, info.windowId); });
+chrome.windows.onFocusChanged.addListener(windowId => { activity.viewChanged(windowId); });
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'hub-maintenance') void ready.then(async () => { await repository.cleanup(); notify(); }).catch(() => undefined); });
-chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'pilovo-activity') { activity.expire(); activity.start(); } });
+// An alarm that wakes the worker starts observing only once the stored settings apply, as at startup: attention sampled
+// before them would count as raised before its service was opted into notifications.
+chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'pilovo-activity') { activity.expire(); void ready.catch(() => undefined).then(() => activity.start()); } });
 // Chrome's command gesture does not survive an await: the nothing-to-review case opens the panel synchronously,
 // in the command's window or else the last focused browser window, tracked ahead of time (window IDs only).
 let lastFocusedWindow: number | undefined;

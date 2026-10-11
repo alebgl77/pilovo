@@ -1,3 +1,3 @@
 import type { Connector, Settings } from './types';
-export const DEFAULT_SETTINGS: Settings = { language: 'fr', theme: 'system', retentionDays: 30, retainPrompts: false, notifications: false, bridgeEnabled: false };
+export const DEFAULT_SETTINGS: Settings = { language: 'fr', theme: 'system', retentionDays: 30, retainPrompts: false, notifications: false, bridgeEnabled: false, autoAcknowledgeSeconds: 0, notifyProviders: [] };
 export const CONNECTORS: Connector[] = ['claude-code', 'codex'].map(id => ({ id: id as Connector['id'], name: id === 'claude-code' ? 'Claude Code' : 'Codex', connection: 'disconnected', maturity: 'proof-of-concept', protocolVersion: 1, adapterVersion: '0.1.0', testedVersion: id === 'claude-code' ? '2.1.289' : '0.160.0', lastVerifiedAt: '2026-10-09T10:29:36.099Z', capabilities: { events: true, results: true, navigation: true, commands: false, approval: false, automaticDiscovery: true, launch: true } }));

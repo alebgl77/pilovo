@@ -19,7 +19,9 @@ describe('standalone extension client capability boundary', () => {
   it('packages only the declared minimal permissions with grant-scoped injection and no external hooks', () => {
     const manifest = JSON.parse(readFileSync(new URL('../../public/manifest.json', import.meta.url), 'utf8'));
     expect(manifest.permissions).toEqual(['storage', 'sidePanel', 'alarms', 'scripting']); expect(manifest.optional_host_permissions).toEqual(WEB_ORIGINS);
-    for (const field of ['optional_permissions', 'host_permissions', 'content_scripts', 'externally_connectable', 'web_accessible_resources']) expect(manifest[field]).toBeUndefined();
+    // The only optional API permission: notifications, for opt-in OS notifications.
+    expect(manifest.optional_permissions).toEqual(['notifications']);
+    for (const field of ['host_permissions', 'content_scripts', 'externally_connectable', 'web_accessible_resources']) expect(manifest[field]).toBeUndefined();
     // Commands are keyboard bindings, not permissions: one suggested key, the bulk action left for the user to assign.
     expect(Object.keys(manifest.commands)).toEqual(['_execute_action', 'focus-next-attention', 'acknowledge-all-attention']);
     expect(manifest.commands['focus-next-attention']).toEqual({ suggested_key: { default: 'Alt+Shift+J', mac: 'Alt+Shift+J' }, description: '__MSG_commandNextAttention__' });
@@ -57,8 +59,31 @@ describe('standalone extension client capability boundary', () => {
     const ids = [crypto.randomUUID(), crypto.randomUUID()];
     expect(await client.acknowledgeAllWebActivity!(ids)).toBe(2); expect(sendMessage).toHaveBeenCalledExactlyOnceWith({ channel: 'hub.rpc', request: { method: 'acknowledgeAllWebActivity', attentionIds: ids } });
   });
-  it('keeps mark all and shortcuts unavailable in the browser preview', async () => {
+  it('reads, requests and removes only the notifications permission, synchronously from the UI call and never through RPC', async () => {
+    vi.resetModules(); const contains = vi.fn().mockResolvedValue(false), request = vi.fn().mockResolvedValue(true), remove = vi.fn().mockResolvedValue(true), sendMessage = vi.fn();
+    vi.stubGlobal('chrome', { runtime: { id: 'extension', sendMessage }, permissions: { contains, request, remove } });
+    const { client } = await import('../../src/platform/client');
+    expect(await client.hasNotificationPermission!()).toBe(false); expect(contains).toHaveBeenCalledExactlyOnceWith({ permissions: ['notifications'] });
+    const pending = client.requestNotificationPermission!(); expect(request).toHaveBeenCalledExactlyOnceWith({ permissions: ['notifications'] }); expect(await pending).toBe(true);
+    expect(await client.removeNotificationPermission!()).toBe(true); expect(remove).toHaveBeenCalledExactlyOnceWith({ permissions: ['notifications'] });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+  it('keeps mark all, labels, shortcuts and the panel window unavailable in the browser preview', async () => {
     vi.resetModules(); vi.stubGlobal('chrome', undefined); vi.stubGlobal('indexedDB', new IDBFactory()); const { client } = await import('../../src/platform/client');
     await expect(client.acknowledgeAllWebActivity!()).rejects.toMatchObject({ code: 'runtime.unavailable' }); expect(client.getShortcuts).toBeUndefined();
+    await expect(client.labelWebActivity!(crypto.randomUUID(), 'Revue')).rejects.toMatchObject({ code: 'runtime.unavailable' }); expect(client.getCurrentWindowId).toBeUndefined();
+    // No OS notifications in the preview: the settings disable them and say why.
+    for (const method of ['hasNotificationPermission', 'requestNotificationPermission', 'removeNotificationPermission'] as const) expect(client[method]).toBeUndefined();
+  });
+  it('sends a label as one RPC and reads the panel window locally, without RPC or permission', async () => {
+    vi.resetModules(); const sendMessage = vi.fn().mockResolvedValue({ ok: true }), getCurrent = vi.fn().mockResolvedValue({ id: 7, focused: true });
+    vi.stubGlobal('chrome', { runtime: { id: 'extension', sendMessage }, windows: { getCurrent } }); const { client } = await import('../../src/platform/client');
+    const id = crypto.randomUUID();
+    await client.labelWebActivity!(id, 'Revue contrat'); await client.labelWebActivity!(id, null);
+    expect(sendMessage.mock.calls).toEqual([[{ channel: 'hub.rpc', request: { method: 'labelWebActivity', id, label: 'Revue contrat' } }], [{ channel: 'hub.rpc', request: { method: 'labelWebActivity', id, label: null } }]]);
+    sendMessage.mockClear();
+    expect(await client.getCurrentWindowId!()).toBe(7); expect(getCurrent).toHaveBeenCalledOnce(); expect(sendMessage).not.toHaveBeenCalled();
+    for (const window of [{}, { id: -1 }, { id: 1.5 }, undefined]) { getCurrent.mockResolvedValueOnce(window); expect(await client.getCurrentWindowId!()).toBeUndefined(); }
+    getCurrent.mockRejectedValueOnce(new Error('No current window')); await expect(client.getCurrentWindowId!()).rejects.toMatchObject({ code: 'runtime.unavailable' });
   });
 });

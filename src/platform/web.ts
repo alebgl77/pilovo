@@ -1,7 +1,8 @@
 import { HubError } from '../shared/errors';
 import { emptyWebDiscovery, WEB_ORIGINS, WEB_PROVIDERS, webProviderSchema, type WebDiscovery, type WebProvider } from '../shared/web';
 
-export interface WebTab { id?: number; windowId: number; url?: string; pendingUrl?: string; incognito?: boolean; discarded?: boolean; frozen?: boolean; status?: string }
+// index is Chrome's 0-based position in the window; like windowId it is readable without the tabs permission.
+export interface WebTab { id?: number; windowId: number; index?: number; url?: string; pendingUrl?: string; incognito?: boolean; discarded?: boolean; frozen?: boolean; status?: string }
 export interface WebBrowserAccess {
   hasPermission(provider?: WebProvider): Promise<boolean>;
   queryTabs(patterns: string[]): Promise<WebTab[]>;

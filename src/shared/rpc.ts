@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { hashEvidenceSchema } from '../domain/verification';
 import { controlRequestSchema } from './launch';
-import { webPreparationInputSchema, webPreparationPatchSchema, webProviderSchema } from './web';
+import { notifyProvidersSchema, webPreparationInputSchema, webPreparationPatchSchema, webProviderSchema } from './web';
+import { activityLabelSchema, autoAcknowledgeSchema } from './activity';
 const key = z.string().min(1).max(350);
 export const rpcSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('getWebActivity') }).strict(),
@@ -9,6 +10,8 @@ export const rpcSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('acknowledgeWebActivity'), id: z.uuid(), attentionId: z.uuid() }).strict(),
   // Without IDs (keyboard command), every current attention; with IDs, only those the panel displayed.
   z.object({ method: z.literal('acknowledgeAllWebActivity'), attentionIds: z.array(z.uuid()).min(1).max(256).optional() }).strict(),
+  // A trimmed plain-text label (1-40 characters, no controls or bidi overrides) for one current observation; null clears it.
+  z.object({ method: z.literal('labelWebActivity'), id: z.uuid(), label: activityLabelSchema.nullable() }).strict(),
   z.object({ method: z.literal('getWebDiscovery') }).strict(),
   z.object({ method: z.literal('createWebPreparation'), input: webPreparationInputSchema }).strict(),
   z.object({ method: z.literal('updateWebPreparation'), id: z.uuid(), patch: webPreparationPatchSchema }).strict(),
@@ -23,7 +26,7 @@ export const rpcSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('assignTask'), key, missionId: z.uuid().optional() }).strict(),
   z.object({ method: z.literal('reviewTask'), key, status: z.enum(['pending', 'accepted', 'rejected']), comment: z.string().max(4000).optional() }).strict(),
   z.object({ method: z.literal('recordVerification'), key, evidence: hashEvidenceSchema }).strict(),
-  z.object({ method: z.literal('updateSettings'), patch: z.object({ language: z.enum(['fr','en']).optional(), theme: z.enum(['system','light','dark']).optional(), retentionDays: z.number().int().min(1).max(365).optional(), retainPrompts: z.boolean().optional(), notifications: z.boolean().optional(), bridgeEnabled: z.boolean().optional() }).strict() }).strict(),
+  z.object({ method: z.literal('updateSettings'), patch: z.object({ language: z.enum(['fr','en']).optional(), theme: z.enum(['system','light','dark']).optional(), retentionDays: z.number().int().min(1).max(365).optional(), retainPrompts: z.boolean().optional(), notifications: z.boolean().optional(), bridgeEnabled: z.boolean().optional(), autoAcknowledgeSeconds: autoAcknowledgeSchema.optional(), notifyProviders: notifyProvidersSchema.optional() }).strict() }).strict(),
   z.object({ method: z.literal('deleteTask'), key }).strict(),
   z.object({ method: z.literal('deleteMission'), id: z.uuid(), deleteTasks: z.boolean().optional() }).strict(),
   ...(['purgeAll', 'exportData', 'connectBridge', 'disconnectBridge'] as const).map(method => z.object({ method: z.literal(method) }).strict()),

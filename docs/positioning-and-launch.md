@@ -11,7 +11,7 @@ Pilovo aide les personnes qui travaillent dans ChatGPT et Claude à repérer des
 
 Le pilote observe localement des contrôles et annonces d'état dédiés du DOM après accord individuel par site. Il ne collecte pas les conversations, consignes, réponses complètes ou titres d'onglets. Les métadonnées d'activité sont temporaires ; les préparations manuelles sauvegardées restent un espace distinct.
 
-Les adaptateurs EN/FR sont expérimentaux. Un état inconnu indique une absence de preuve exploitable, notamment après expiration ou ralentissement d'un onglet. Réponse prête exige un travail observé puis un signal stabilisé ; vu est un acquittement local. Le badge représente la dernière attention observée, avec nettoyage best effort. Ni notification système, ni arrêt/pause/lancement, ni contrôle natif n'est proposé.
+Les adaptateurs EN/FR sont expérimentaux. Un état inconnu indique une absence de preuve exploitable, notamment après expiration ou ralentissement d'un onglet. Réponse prête exige un travail observé puis un signal stabilisé ; vu est un acquittement local. Le badge représente la dernière attention observée, avec nettoyage best effort. Ni arrêt/pause/lancement, ni contrôle natif n'est proposé. La préversion 0.4.0 n'envoie aucune notification système ; les sources non publiées en proposent en option, par service, désactivées par défaut.
 
 L'hypothèse à tester : cette visibilité limitée peut aider à reprendre plusieurs travaux sans relire ou copier leurs échanges. Elle ne prouve ni gain de temps ni préférence utilisateur.
 
