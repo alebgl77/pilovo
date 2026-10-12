@@ -9,7 +9,7 @@ La version 0.4.0 est une préversion expérimentale pour Chrome 120 ou plus réc
 
 ![Bannière Pilovo : logo P, slogan anglais « Keep your AI in view. », mentions « AI activity for Chrome » et « ChatGPT + Claude · Preview », à côté de lignes d'activité abstraites. Illustration, pas une capture du produit.](media/pilovo-github-banner.png)
 
-[English](../README.md) · [Installation pas à pas](installation.fr.md) · [Questions fréquentes](faq.fr.md) · [Confidentialité (en anglais)](privacy.md) · [Compatibilité (en anglais)](compatibility.md) · [Journal des modifications (en anglais)](../CHANGELOG.md)
+[Site web](https://alebgl77.github.io/pilovo/fr/) · [English](../README.md) · [Installation pas à pas](installation.fr.md) · [Questions fréquentes](faq.fr.md) · [Confidentialité (en anglais)](privacy.md) · [Compatibilité (en anglais)](compatibility.md) · [Journal des modifications (en anglais)](../CHANGELOG.md)
 
 ![Visite animée de l'extension Chrome Pilovo avec des données synthétiques : liste d'activité, Ouvrir la session et Marquer comme vu, numéros et noms de session, paramètres et panneau latéral. Les écrans marqués NON PUBLIÉ montrent des fonctions disponibles seulement en compilant les sources.](media/pilovo-tour-fr.gif)
 
@@ -96,7 +96,7 @@ Les règles, abonnements et quotas de votre compte chez le fournisseur restent a
 
 Pilovo ne demande jamais la permission `tabs`, l'accès à tous les sites ni `nativeMessaging`.
 
-L'observateur isolé est activé uniquement sur le site autorisé. Il examine des contrôles et indicateurs d'état du DOM, sans collecter les consignes, réponses complètes, titres d'onglets, captures, cookies ou identifiants. Les métadonnées d'activité sont locales et temporaires ; elles sont reconstruites avec des preuves fraîches après redémarrage. Les noms de session que vous saisissez (non publiés) restent dans cette mémoire le temps de vie de leur onglet, sans jamais être enregistrés ni exportés. Le « Vu » automatique facultatif (non publié, désactivé par défaut) lit seulement quel onglet est actif dans la fenêtre active, sous forme d'identifiants et d'indicateurs gardés en mémoire. Les notifications système facultatives (non publiées, désactivées par défaut) contiennent seulement le service, le motif et le numéro de session ; votre système peut les conserver dans son centre de notifications. Ni backend, ni API de modèle, ni télémétrie distante, ni synchronisation cloud. Le retrait d'accès invalide l'observation ; le bail local impose une coupure logique sous 15 secondes, même si Chrome retarde le nettoyage. Voir la [notice de confidentialité](privacy.md) et le [contrat technique](core-contract.md), tous deux en anglais.
+L'observateur isolé est activé uniquement sur le site autorisé. Il examine des contrôles et indicateurs d'état du DOM, sans collecter les consignes, réponses complètes, titres d'onglets, captures, cookies ou identifiants de connexion. Les métadonnées d'activité sont locales et temporaires ; elles sont reconstruites avec des preuves fraîches après redémarrage. Les noms de session que vous saisissez (non publiés) restent dans cette mémoire le temps de vie de leur onglet, sans jamais être enregistrés ni exportés. Le « Vu » automatique facultatif (non publié, désactivé par défaut) lit seulement quel onglet est actif dans la fenêtre active, sous forme d'identifiants et d'indicateurs gardés en mémoire. Les notifications système facultatives (non publiées, désactivées par défaut) contiennent seulement le service, le motif et le numéro de session ; votre système peut les conserver dans son centre de notifications. Ni backend, ni API de modèle, ni télémétrie distante, ni synchronisation cloud. Le retrait d'accès invalide l'observation ; le bail local impose une coupure logique sous 15 secondes, même si Chrome retarde le nettoyage. Voir la [notice de confidentialité](privacy.md) et le [contrat technique](core-contract.md), tous deux en anglais.
 
 ## Questions fréquentes
 
@@ -110,19 +110,19 @@ Pas dans la version 0.4.0 : la préversion publiée de l'extension Chrome Pilovo
 
 ### Pilovo lit-il mes conversations ?
 
-Non. Après votre accord pour un site, l'observateur de Pilovo y lit un ensemble limité de contrôles et d'indicateurs d'état ; il ne collecte ni conversations complètes, ni texte des consignes ou des réponses, ni titres d'onglets, captures, cookies ou identifiants. Rien n'est envoyé à un serveur : Pilovo n'a ni backend ni télémétrie. Voir la [notice de confidentialité](privacy.md) (en anglais).
+Non. Après votre accord pour un site, l'observateur de l'extension Chrome Pilovo y lit un ensemble limité de contrôles et d'indicateurs d'état ; il ne collecte ni conversations complètes, ni texte des consignes ou des réponses, ni titres d'onglets, captures, cookies ou identifiants de connexion. Rien n'est envoyé à un serveur : Pilovo n'a ni backend ni télémétrie. Voir la [notice de confidentialité](privacy.md) (en anglais).
 
 ### Quelles autorisations Pilovo demande-t-il ?
 
-Pilovo exige exactement quatre autorisations Chrome (permissions) : `storage`, `sidePanel`, `alarms` et `scripting`. L'accès à `https://chatgpt.com/*` et à `https://claude.ai/*` est facultatif et demandé séparément pour chaque site ; les sources actuelles ajoutent une seule permission facultative, `notifications` (non publiée), demandée uniquement quand vous cliquez. Pilovo ne demande jamais `tabs`, l'accès à tous les sites ni `nativeMessaging` ; voir [Ce que Pilovo peut voir](#ce-que-pilovo-peut-voir).
+L'extension Chrome Pilovo exige exactement quatre autorisations (permissions) : `storage`, `sidePanel`, `alarms` et `scripting`. L'accès à `https://chatgpt.com/*` et à `https://claude.ai/*` est facultatif et demandé séparément pour chaque site ; les sources actuelles ajoutent une seule permission facultative, `notifications` (non publiée), demandée uniquement quand vous cliquez. Pilovo ne demande jamais `tabs`, l'accès à tous les sites ni `nativeMessaging` ; voir [Ce que Pilovo peut voir](#ce-que-pilovo-peut-voir).
 
 ### Pilovo est-il sur le Chrome Web Store ?
 
-Non. Pilovo 0.4.0 est une préversion publiée sur GitHub, à charger avec **Charger l'extension non empaquetée**, sans mise à jour automatique. Voir le [guide d'installation](installation.fr.md).
+Non. L'extension Chrome Pilovo 0.4.0 est une préversion publiée sur GitHub, à charger avec **Charger l'extension non empaquetée**, sans mise à jour automatique. Voir le [guide d'installation](installation.fr.md).
 
 ### Pilovo est-il gratuit ? Faut-il un compte ou une clé API ?
 
-Le cœur de Pilovo est gratuit sous licence MIT, sans compte Pilovo, clé API ni application compagnon. Vous continuez d'utiliser votre propre compte web ChatGPT ou Claude, avec ses abonnements et ses quotas.
+Le cœur de l'extension Chrome Pilovo est gratuit sous licence MIT, sans compte Pilovo, clé API ni application compagnon. Vous continuez d'utiliser votre propre compte web ChatGPT ou Claude, avec ses abonnements et ses quotas.
 
 ### « Réponse disponible » signifie-t-il que ma tâche a réussi ?
 
@@ -130,11 +130,11 @@ Non. **Réponse disponible** (réponse prête) signifie que la génération s'es
 
 ### Avec quels navigateurs, applications et sites Pilovo fonctionne-t-il ?
 
-Pilovo vise Chrome 120 ou plus récent et observe uniquement les pages `chatgpt.com` et `claude.ai` ouvertes dans des onglets Chrome. Les autres navigateurs, y compris ceux basés sur Chromium, ne sont ni testés ni revendiqués ; Firefox et Safari ne sont pas pris en charge, et ni les applications de bureau ou mobiles ni les autres sites d'IA ne sont observés.
+L'extension Chrome Pilovo est conçue pour Chrome 120 ou plus récent et n'observe que les onglets web `chatgpt.com` et `claude.ai` ; elle n'observe ni les applications de bureau ou mobiles de ChatGPT ou de Claude, ni les autres sites d'IA. Les autres navigateurs, y compris ceux basés sur Chromium, ne sont ni testés ni revendiqués ; Firefox et Safari ne sont pas pris en charge.
 
 ### Pilovo est-il une extension officielle de ChatGPT ou de Claude ?
 
-Non. Pilovo est un projet open source indépendant, sans lien avec les sociétés qui exploitent ChatGPT et Claude, et sans approbation ni parrainage de leur part ; ces noms servent uniquement à désigner les services observés.
+Non. Pilovo est une extension Chrome open source indépendante, sans lien avec les sociétés qui exploitent ChatGPT et Claude, et sans approbation ni parrainage de leur part ; ces noms servent uniquement à désigner les services observés.
 
 D'autres réponses, dont le dépannage : [Questions fréquentes](faq.fr.md).
 

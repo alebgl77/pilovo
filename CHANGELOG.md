@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Adds a bilingual website (English at the root, French under `/fr/`) built by `npm run build:site` from `site/` and deployed to GitHub Pages by `.github/workflows/pages.yml`: statically pre-rendered pages with self-hosted fonts and no third-party requests or cookies, FAQ pages generated from `docs/faq.md` and `docs/faq.fr.md`, structured data, a sitemap and `llms.txt`, checked by `npm run test:site`. No extension behavior changes.
 - Adds an animated interface tour to the English and French READMEs (`docs/media/pilovo-tour-{en,fr}.gif`): the actual UI with synthetic data, unreleased screens labeled as such.
 - Adds keyboard commands. **Go to the next item to review** (suggested `Alt+Shift+J`) focuses the earliest unacknowledged attention through the same revalidation as **Open session**, provided the fresh sample still shows that attention. When revalidation or activation fails, it moves on to the next candidate (each initially selected candidate at most once, never looping). When nothing needs review it opens the side panel, in the command's window or the last focused browser window; after every candidate failed it also tries to, best effort. **Mark all items to review as seen** has no default key; assign it at `chrome://extensions/shortcuts`.
 - Adds a **Mark all as seen** panel action when two or more items need review. It acknowledges locally only the attention identities the panel displayed and confirms through a refreshed snapshot. A discreet hint shows the configured next-item shortcut and hides when none is assigned.

@@ -24,8 +24,8 @@ test('Chrome artifact includes the isolated observer and rejects unreviewed file
   assert.throws(() => validateChromeFiles(files.filter(file => !file.endsWith('.css'))), /Missing Chrome UI assets/);
 });
 test('publication allowlist excludes profiles, generated files, credentials and ancestor paths', () => {
-  for (const good of ['package-lock.json', 'src/ui/App.tsx', 'tests/core/repository.test.ts', '.github/workflows/ci.yml', 'docs/privacy.md']) assert.equal(allowedSource(good), true, good);
-  for (const bad of ['../README.md', '/src/code.ts', 'src/../secret', '.env', 'docs/.env.local', 'tests/ui/results/report.json', 'work/profile/file', 'node_modules/x.js', '.Codex/routing-ledger.md', 'dist/manifest.json', 'companion-dist/native.cjs', 'tests/browser-profile/Preferences', 'src/private.key', 'unknown.txt']) assert.equal(allowedSource(bad), false, bad);
+  for (const good of ['package-lock.json', 'src/ui/App.tsx', 'tests/core/repository.test.ts', '.github/workflows/ci.yml', 'docs/privacy.md', 'site/src/config.mjs', 'site/assets/media/media.json', '.github/workflows/pages.yml']) assert.equal(allowedSource(good), true, good);
+  for (const bad of ['../README.md', '/src/code.ts', 'src/../secret', '.env', 'docs/.env.local', 'tests/ui/results/report.json', 'work/profile/file', 'node_modules/x.js', '.Codex/routing-ledger.md', 'dist/manifest.json', 'companion-dist/native.cjs', 'tests/browser-profile/Preferences', 'src/private.key', 'unknown.txt', 'site-dist/index.html', 'site/site-dist/index.html']) assert.equal(allowedSource(bad), false, bad);
 });
 test('secret checks redact values and recognize personal paths in public docs', () => {
   const token = 'ghp_' + 'a'.repeat(36);

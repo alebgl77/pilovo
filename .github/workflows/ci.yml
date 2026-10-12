@@ -25,6 +25,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:publication
+      - run: npm run build:site
+      - run: npm run test:site
       - run: npm run check:publication -- --tracked
       - run: npm run build
       - run: npm run package:check

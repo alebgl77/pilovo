@@ -4,7 +4,7 @@ Start with a focused [issue](https://github.com/alebgl77/pilovo/issues) describi
 
 Good first contributions include a contextual French/English label correction, a reproducible keyboard navigation problem, or a permission denial/revocation observation with the Chrome version. These are suggestions, not claims that labeled issues already exist.
 
-Use Node.js 22.12+, run `npm ci`, then `npm run typecheck`, `npm test`, `npm run test:publication` and `npm run build`. `npm run dev` previews the UI; load `dist/` in Chrome for extension behavior. Read [PRODUCT](PRODUCT.md) and the [contract](docs/core-contract.md) before changing a user-facing boundary.
+Use Node.js 22.12+, run `npm ci`, then `npm run typecheck`, `npm test`, `npm run test:publication` and `npm run build`. `npm run dev` previews the UI; load `dist/` in Chrome for extension behavior. For the website in `site/`, `npm run build:site` writes `site-dist/` (`--out <dir>` for another folder, `SITE_URL` for another address) and `npm run test:site` builds and checks it in a temporary folder. `.github/workflows/pages.yml` deploys it from `main` once the repository's Pages source is set to GitHub Actions (Settings > Pages). Read [PRODUCT](PRODUCT.md) and the [contract](docs/core-contract.md) before changing a user-facing boundary.
 
 Keep changes narrow and add a regression test for a bug. Explain what changed, how it was tested and any remaining limitation. Never include real prompts, exports, profiles, credentials or personal paths in an issue, screenshot, fixture or commit. Screenshots should use fictional content and say so.
 

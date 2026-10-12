@@ -14,11 +14,11 @@ Version 0.4.0 is an experimental preview installed manually from GitHub; see the
 
 ### Is Pilovo an official ChatGPT or Claude extension?
 
-No. Pilovo is an independent open-source project, not affiliated with, endorsed by or sponsored by the companies that operate ChatGPT or Claude; those names only identify the services Pilovo observes. Provider account rules, plans and quotas still apply.
+No. Pilovo is an independent open-source Chrome extension, not affiliated with, endorsed by or sponsored by the companies that operate ChatGPT or Claude; those names only identify the services Pilovo observes. Provider account rules, plans and quotas still apply.
 
 ### Is Pilovo free? Do I need an account or an API key?
 
-Pilovo's core is free under the MIT license, and you need no Pilovo account, API key or companion app. You keep using your own ChatGPT or Claude web account, with its plans and quotas. Node.js is needed only to build from source.
+The core of the Pilovo Chrome extension is free under the MIT license, and you need no Pilovo account, API key or companion app. You keep using your own ChatGPT or Claude web account, with its plans and quotas. Node.js is needed only to build from source.
 
 ### Is Pilovo available in English? Why does it open in French?
 
@@ -66,7 +66,7 @@ Not in 0.4.0. Unreleased (build from source): rows show elapsed durations to the
 
 ### Does Pilovo read my conversations?
 
-No. After you grant a site, Pilovo's observer reads a limited set of page controls and dedicated status indicators there; it does not collect full conversations, prompt or response text, tab titles, screenshots, cookies or credentials. Nothing is sent to a server: Pilovo has no backend or telemetry. Reading those indicators is still page access, which is why Chrome asks you to allow each site. See [Privacy](privacy.md).
+No. After you grant a site, the Pilovo Chrome extension's observer reads a limited set of page controls and dedicated status indicators there; it does not collect full conversations, prompt or response text, tab titles, screenshots, cookies or credentials. Nothing is sent to a server: Pilovo has no backend or telemetry. Reading those indicators is still page access, which is why Chrome asks you to allow each site. See [Privacy](privacy.md).
 
 ### Can a Chrome extension read my ChatGPT chats?
 
@@ -74,7 +74,7 @@ An extension with access to chatgpt.com or claude.ai can technically read those 
 
 ### Which permissions does Pilovo request?
 
-Pilovo requires exactly four permissions: `storage`, `sidePanel`, `alarms` and `scripting`. Access to `https://chatgpt.com/*` and `https://claude.ai/*` is optional and requested separately for each site; the current source adds just one optional permission, `notifications` (unreleased), requested only when you click. Pilovo never requests `tabs`, access to all sites or `nativeMessaging`; see [What Pilovo can see](../README.md#what-pilovo-can-see).
+The Pilovo Chrome extension requires exactly four permissions: `storage`, `sidePanel`, `alarms` and `scripting`. Access to `https://chatgpt.com/*` and `https://claude.ai/*` is optional and requested separately for each site; the current source adds just one optional permission, `notifications` (unreleased), requested only when you click. Pilovo never requests `tabs`, access to all sites or `nativeMessaging`; see [What Pilovo can see](../README.md#what-pilovo-can-see).
 
 ### Why does Chrome say Pilovo can read and change data on chatgpt.com or claude.ai?
 
@@ -96,7 +96,7 @@ Select **Disconnect** for that service under **Connected services** in Pilovo, o
 
 ### Is Pilovo on the Chrome Web Store?
 
-No. Pilovo 0.4.0 is a GitHub prerelease that you load with **Load unpacked**, without automatic updates. See the [installation guide](installation.md).
+No. The Pilovo 0.4.0 Chrome extension is a GitHub prerelease that you load with **Load unpacked**, without automatic updates. See the [installation guide](installation.md).
 
 ### How do I install Pilovo from GitHub?
 
@@ -114,7 +114,7 @@ With Node.js 22.12 or later, run `npm ci`, `npm test` and `npm run build`, then 
 
 ### Which browsers, apps and sites does Pilovo work with?
 
-Pilovo targets Chrome 120 or later and observes only `chatgpt.com` and `claude.ai` pages in Chrome tabs. Other browsers, including other Chromium-based browsers, are not tested or claimed; Firefox and Safari are not supported, and desktop or mobile apps and other AI websites are not observed.
+The Pilovo Chrome extension is made for Chrome 120 or later and observes only `chatgpt.com` and `claude.ai` web tabs; it does not observe the ChatGPT or Claude desktop or mobile apps, or other AI websites. Other browsers, including other Chromium-based browsers, are not tested or claimed; Firefox and Safari are not supported.
 
 ### Does Pilovo work with ChatGPT agent, Claude in Chrome, Claude Code or Codex?
 
