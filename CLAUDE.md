@@ -21,12 +21,14 @@ npx vitest run tests/core/activity-controller.test.ts   # single file
 npx vitest run -t "name"     # single test by name
 npm run test:publication     # node --test scripts/publication.test.mjs
 npm run check:publication -- --tracked   # scans tracked files for leaks/allowlist/broken md links (CI runs this)
+npm run build:site           # static bilingual website from site/ → site-dist/ (--out <dir>; SITE_URL overrides the base URL)
+npm run test:site            # node --test scripts/site.test.mjs: builds into temp dirs and checks SEO/privacy/copy rules
 npm run build                # tsc + vite build (index.html, sidepanel.html) + scripts/build.mjs (background.js, observer.js) → dist/
 npm run package:check        # validates release packaging without writing (needs dist/ from build)
 npm run dev                  # UI preview only at 127.0.0.1:5173 (no real site observation)
 ```
 
-CI (`.github/workflows/ci.yml`) runs, in order: `npm ci`, typecheck, test, test:publication, `check:publication -- --tracked`, build, package:check, package. Reproduce that locally before pushing.
+CI (`.github/workflows/ci.yml`) runs, in order: `npm ci`, typecheck, test, test:publication, build:site, test:site, `check:publication -- --tracked`, build, package:check, package. Reproduce that locally before pushing. `.github/workflows/pages.yml` deploys `site-dist/` to GitHub Pages from `main` (one-time repository setting: Settings > Pages > Source: GitHub Actions); `npm run site:media` (local only, needs ffmpeg and the gitignored `outputs/` sources) regenerates the committed media under `site/assets/`.
 
 `npm run package` creates immutable versioned ZIPs under `release/v<version>/` (per-version lock; refuses to overwrite). Only run it after reviewing the exact build. The script file is still named `scripts/package-briefoak.mjs` on purpose.
 

@@ -1,0 +1,599 @@
+{
+  "note": "Written by scripts/site-media.mjs. Dimensions are read by scripts/build-site.mjs; this file is not published.",
+  "assets": [
+    {
+      "id": "sessions-en",
+      "kind": "capture",
+      "source": "outputs/videos/pilovo-readme-tour/assets/screens/en/sessions.png",
+      "provenance": "Actual Pilovo interface rendered from the synthetic UI harness; synthetic local activity, not a real provider session.",
+      "released": false,
+      "synthetic": true,
+      "crop": {
+        "width": 896,
+        "height": 560,
+        "x": 360,
+        "y": 880
+      },
+      "files": [
+        {
+          "path": "media/sessions-en-480.webp",
+          "width": 480,
+          "height": 300,
+          "bytes": 8438,
+          "sha256": "14a5b2a08fdb7cf8a083597092a5b20ce2910d24a9582c4afee8d37c828fa1af"
+        },
+        {
+          "path": "media/sessions-en-720.webp",
+          "width": 720,
+          "height": 450,
+          "bytes": 14410,
+          "sha256": "32ffdba9936dbc4370353e66d35b5268b750360c7315ced7357b97ec7c1befcb"
+        },
+        {
+          "path": "media/sessions-en-896.webp",
+          "width": 896,
+          "height": 560,
+          "bytes": 19062,
+          "sha256": "35e32acf60586eeb246c7d4951c39ad04929019f5d87c3e9740365b3c64f7d8b"
+        }
+      ]
+    },
+    {
+      "id": "sessions-fr",
+      "kind": "capture",
+      "source": "outputs/videos/pilovo-readme-tour/assets/screens/fr/sessions.png",
+      "provenance": "Actual Pilovo interface rendered from the synthetic UI harness; synthetic local activity, not a real provider session.",
+      "released": false,
+      "synthetic": true,
+      "crop": {
+        "width": 896,
+        "height": 560,
+        "x": 360,
+        "y": 880
+      },
+      "files": [
+        {
+          "path": "media/sessions-fr-480.webp",
+          "width": 480,
+          "height": 300,
+          "bytes": 10076,
+          "sha256": "265e3b6978901b1e4ed2bc1302325b0bfb62764024dae3fa08617f52b8cbafa0"
+        },
+        {
+          "path": "media/sessions-fr-720.webp",
+          "width": 720,
+          "height": 450,
+          "bytes": 17164,
+          "sha256": "9f27f365cc3e01210a99911c9fe76c8eaba5aa023464e396f038d6c1b71b2774"
+        },
+        {
+          "path": "media/sessions-fr-896.webp",
+          "width": 896,
+          "height": 560,
+          "bytes": 22978,
+          "sha256": "9b82d13b8375996a135e8aa18a7f34057fa638c36a97624b1fed378e016aebd9"
+        }
+      ]
+    },
+    {
+      "id": "settings-en",
+      "kind": "capture",
+      "source": "outputs/videos/pilovo-readme-tour/assets/screens/en/settings.png",
+      "provenance": "Actual Pilovo interface rendered from the synthetic UI harness; synthetic local activity, not a real provider session.",
+      "released": false,
+      "synthetic": true,
+      "crop": {
+        "width": 840,
+        "height": 525,
+        "x": 360,
+        "y": 328
+      },
+      "files": [
+        {
+          "path": "media/settings-en-480.webp",
+          "width": 480,
+          "height": 300,
+          "bytes": 15910,
+          "sha256": "1acc5a2576fb897a8dfeab2742ac2819b3ae5cf36a34c2f71bb123828b9c1eb5"
+        },
+        {
+          "path": "media/settings-en-720.webp",
+          "width": 720,
+          "height": 450,
+          "bytes": 26320,
+          "sha256": "c4830c446455ff781dea11e035f69f9cb85d46314cd5a438a1337954dc999c69"
+        },
+        {
+          "path": "media/settings-en-840.webp",
+          "width": 840,
+          "height": 526,
+          "bytes": 32056,
+          "sha256": "7f7939eaf18ec0d2a58393037bac9137301206563564a406fcc01e3e0d97d211"
+        }
+      ]
+    },
+    {
+      "id": "settings-fr",
+      "kind": "capture",
+      "source": "outputs/videos/pilovo-readme-tour/assets/screens/fr/settings.png",
+      "provenance": "Actual Pilovo interface rendered from the synthetic UI harness; synthetic local activity, not a real provider session.",
+      "released": false,
+      "synthetic": true,
+      "crop": {
+        "width": 840,
+        "height": 525,
+        "x": 360,
+        "y": 344
+      },
+      "files": [
+        {
+          "path": "media/settings-fr-480.webp",
+          "width": 480,
+          "height": 300,
+          "bytes": 19826,
+          "sha256": "0054637fae9e782b604f30dc0f057a10ecaeb5c550aa1feb7edb52de8decba8e"
+        },
+        {
+          "path": "media/settings-fr-720.webp",
+          "width": 720,
+          "height": 450,
+          "bytes": 32422,
+          "sha256": "7627032ee836efbb7e6499c91144c8690c0cd8db4bd845188513da687d44821b"
+        },
+        {
+          "path": "media/settings-fr-840.webp",
+          "width": 840,
+          "height": 526,
+          "bytes": 40214,
+          "sha256": "cd824e05b41596025264ed46218a7a8dfa222eb97baae604e6fbc659a6a99288"
+        }
+      ]
+    },
+    {
+      "id": "seen-en",
+      "kind": "capture",
+      "source": "outputs/videos/pilovo-readme-tour/assets/screens/en/seen.png",
+      "provenance": "Actual Pilovo interface rendered from the synthetic UI harness; synthetic local activity, not a real provider session.",
+      "released": false,
+      "synthetic": true,
+      "crop": {
+        "width": 1500,
+        "height": 1000,
+        "x": 360,
+        "y": 380
+      },
+      "files": [
+        {
+          "path": "media/seen-en-750.webp",
+          "width": 750,
+          "height": 500,
+          "bytes": 12628,
+          "sha256": "2c748e51ef866050f04a297e56642732eaacd5762a8a917d8ace363437001612"
+        },
+        {
+          "path": "media/seen-en-1100.webp",
+          "width": 1100,
+          "height": 734,
+          "bytes": 21692,
+          "sha256": "010635761810bb5ed3d9558ba84161d963212caab2baa6254dcf418d778a1709"
+        },
+        {
+          "path": "media/seen-en-1500.webp",
+          "width": 1500,
+          "height": 1000,
+          "bytes": 31972,
+          "sha256": "298509e3a2ca04d9acd8c73dfc947ffaab4a5de0bd0cd3712598b34adabcd1fe"
+        }
+      ]
+    },
+    {
+      "id": "seen-fr",
+      "kind": "capture",
+      "source": "outputs/videos/pilovo-readme-tour/assets/screens/fr/seen.png",
+      "provenance": "Actual Pilovo interface rendered from the synthetic UI harness; synthetic local activity, not a real provider session.",
+      "released": false,
+      "synthetic": true,
+      "crop": {
+        "width": 1500,
+        "height": 1000,
+        "x": 360,
+        "y": 380
+      },
+      "files": [
+        {
+          "path": "media/seen-fr-750.webp",
+          "width": 750,
+          "height": 500,
+          "bytes": 14654,
+          "sha256": "0bcbb6b546f79516efe3c68ace6d053ca5a610c7b224623c338c2c1a15d77133"
+        },
+        {
+          "path": "media/seen-fr-1100.webp",
+          "width": 1100,
+          "height": 734,
+          "bytes": 25450,
+          "sha256": "f34697c9fc1e372b00ec07d03b150b2e8a93d867971349c660ee69c3e8d2504e"
+        },
+        {
+          "path": "media/seen-fr-1500.webp",
+          "width": 1500,
+          "height": 1000,
+          "bytes": 37764,
+          "sha256": "476144b6fbd5e698c9bf14089597466243165cb04d304e974977435f81555a0b"
+        }
+      ]
+    },
+    {
+      "id": "states-en",
+      "kind": "capture",
+      "source": "outputs/site-captures/activity-360-dark-v0.4.0@2x.png",
+      "provenance": "Actual Pilovo 0.4.0 interface, captured from the synthetic UI harness of tag v0.4.0 at device scale 2; synthetic local activity, not a real provider session.",
+      "released": true,
+      "synthetic": true,
+      "crop": null,
+      "files": [
+        {
+          "path": "media/states-en-360.webp",
+          "width": 360,
+          "height": 900,
+          "bytes": 22694,
+          "sha256": "ac1c12304ec41360dd0829c96a7ab9ec9813efe784be77f481f0f379245131c9"
+        },
+        {
+          "path": "media/states-en-720.webp",
+          "width": 720,
+          "height": 1800,
+          "bytes": 51090,
+          "sha256": "82046b5edebe9bf7be5cd79db2baa482aa6545e35deb4fcd3c1a7319af22ed36"
+        }
+      ]
+    },
+    {
+      "id": "states-fr",
+      "kind": "capture",
+      "source": "docs/media/screenshots/Pilovo_activity_desktop_synthetic.png",
+      "provenance": "Actual Pilovo interface rendered from the synthetic UI harness; synthetic local activity, not a real provider session.",
+      "released": true,
+      "synthetic": true,
+      "crop": null,
+      "files": [
+        {
+          "path": "media/states-fr-640.webp",
+          "width": 640,
+          "height": 492,
+          "bytes": 13406,
+          "sha256": "3515bf9535d992cd5c3d7dcc0a03336df4a4836401f03f417b8d667a6072fbc5"
+        },
+        {
+          "path": "media/states-fr-960.webp",
+          "width": 960,
+          "height": 738,
+          "bytes": 28206,
+          "sha256": "073e185f8a1b335832a7b32e5950439c44ef7a8ac416e4b0f92a92dded5aa86f"
+        },
+        {
+          "path": "media/states-fr-1365.webp",
+          "width": 1365,
+          "height": 1050,
+          "bytes": 51658,
+          "sha256": "10d07ab08bbaa809603ea708bf9a902d78425ae1554cb4a81f72f5044358b5ae"
+        }
+      ]
+    },
+    {
+      "id": "illus-status-zone",
+      "kind": "illustration",
+      "source": "outputs/videos/pilovo-explainer/assets/generated/explainer-04-capteur.png",
+      "provenance": "Flat brand illustration generated with ChatGPT from the Pilovo brand prompts (ink, olive, ivory, limestone; no text). Editorial image, not a product screenshot.",
+      "crop": null,
+      "files": [
+        {
+          "path": "media/illus-status-zone-640.webp",
+          "width": 640,
+          "height": 360,
+          "bytes": 11854,
+          "sha256": "ac9572733dae4b47ecb2eede1d42423a4f856577516f93c7c94a2a72fbec9e9b"
+        },
+        {
+          "path": "media/illus-status-zone-960.webp",
+          "width": 960,
+          "height": 540,
+          "bytes": 18934,
+          "sha256": "98be0f2c707ddad5d4ea630f329c9ac61fdc05e9ec902939c5177d7d3533aadb"
+        },
+        {
+          "path": "media/illus-status-zone-1280.webp",
+          "width": 1280,
+          "height": 720,
+          "bytes": 26278,
+          "sha256": "56e0e04de068f90ef65bb7587673863d711f3b28d8cb3ed7d8dc1dbeb6084884"
+        },
+        {
+          "path": "media/illus-status-zone-1672.webp",
+          "width": 1672,
+          "height": 942,
+          "bytes": 35646,
+          "sha256": "5228f17d94b231e0a055233a6d6a2fec7e5065959b475250acf7a4e53fb17738"
+        }
+      ]
+    },
+    {
+      "id": "illus-never-requested",
+      "kind": "illustration",
+      "source": "outputs/videos/pilovo-explainer/assets/generated/explainer-07-navigateur.png",
+      "provenance": "Flat brand illustration generated with ChatGPT from the Pilovo brand prompts (ink, olive, ivory, limestone; no text). Editorial image, not a product screenshot.",
+      "crop": null,
+      "files": [
+        {
+          "path": "media/illus-never-requested-480.webp",
+          "width": 480,
+          "height": 270,
+          "bytes": 9514,
+          "sha256": "8a0c7776af9b863522bdefc7a7066f5995bab1dc212a3271ad3eec1b5aa8785b"
+        },
+        {
+          "path": "media/illus-never-requested-720.webp",
+          "width": 720,
+          "height": 406,
+          "bytes": 15454,
+          "sha256": "d28555f6a0f841eb6fe1c2a2e122e2404474d2823de232efc50e7bc025764f71"
+        },
+        {
+          "path": "media/illus-never-requested-960.webp",
+          "width": 960,
+          "height": 540,
+          "bytes": 22636,
+          "sha256": "b24689c9b338c7ba7303f2d2075d507ffb81262009b01dd27a48622e7ea0ba68"
+        }
+      ]
+    },
+    {
+      "id": "illus-overview",
+      "kind": "illustration",
+      "source": "outputs/videos/pilovo-explainer/assets/generated/explainer-01-tour.png",
+      "provenance": "Flat brand illustration generated with ChatGPT from the Pilovo brand prompts (ink, olive, ivory, limestone; no text). Editorial image, not a product screenshot.",
+      "crop": null,
+      "files": [
+        {
+          "path": "media/illus-overview-480.webp",
+          "width": 480,
+          "height": 270,
+          "bytes": 6164,
+          "sha256": "0d692a36fabdff151e098e43b724fc8e8f836f4293c2f28246a615a15e022065"
+        },
+        {
+          "path": "media/illus-overview-800.webp",
+          "width": 800,
+          "height": 450,
+          "bytes": 13732,
+          "sha256": "5f8355a3c8e22eef77fc4cffbe39c05a846f07aac6c4637e27dc43669a11b446"
+        },
+        {
+          "path": "media/illus-overview-1200.webp",
+          "width": 1200,
+          "height": 676,
+          "bytes": 24414,
+          "sha256": "a02c3ce8159891d764b60bdbeebbcf9f20e726460d4f3385c382c601639fb6d0"
+        }
+      ]
+    },
+    {
+      "id": "illus-panel-layers",
+      "kind": "illustration",
+      "source": "outputs/videos/pilovo-nouveautes/assets/generated/nouveautes-01-eclatee.png",
+      "provenance": "Flat brand illustration generated with ChatGPT from the Pilovo brand prompts (ink, olive, ivory, limestone; no text). Editorial image, not a product screenshot.",
+      "crop": null,
+      "files": [
+        {
+          "path": "media/illus-panel-layers-480.webp",
+          "width": 480,
+          "height": 270,
+          "bytes": 7478,
+          "sha256": "5023eab0c2e946e192113d66f18e9f4e4b6ca6f183ef128f21518ff715e0d1df"
+        },
+        {
+          "path": "media/illus-panel-layers-720.webp",
+          "width": 720,
+          "height": 406,
+          "bytes": 14846,
+          "sha256": "859d6fdb167a41a0e2cb46f35a9b17bacb05ce2f4970efbac80bd32f1eeaed52"
+        },
+        {
+          "path": "media/illus-panel-layers-960.webp",
+          "width": 960,
+          "height": 540,
+          "bytes": 23738,
+          "sha256": "b1853b8ac2b34ff2a66b53265e98046a7b7cbfed74741dd285dac56f6d802960"
+        }
+      ]
+    },
+    {
+      "id": "illus-shortcuts",
+      "kind": "illustration",
+      "source": "outputs/videos/pilovo-nouveautes/assets/generated/nouveautes-02-touches.png",
+      "provenance": "Flat brand illustration generated with ChatGPT from the Pilovo brand prompts (ink, olive, ivory, limestone; no text). Editorial image, not a product screenshot.",
+      "crop": {
+        "width": 1505,
+        "height": 941,
+        "x": 150,
+        "y": 0
+      },
+      "files": [
+        {
+          "path": "media/illus-shortcuts-480.webp",
+          "width": 480,
+          "height": 300,
+          "bytes": 9854,
+          "sha256": "d90e71dac9ef96d38ec9c6a24036694fb444a6ffbdf3e1d4ec0df37045429966"
+        },
+        {
+          "path": "media/illus-shortcuts-720.webp",
+          "width": 720,
+          "height": 450,
+          "bytes": 17016,
+          "sha256": "2efafdd2c860d4ddb932dda79600f09bf0504ede58f56d58b5c631f56d3f114f"
+        },
+        {
+          "path": "media/illus-shortcuts-960.webp",
+          "width": 960,
+          "height": 600,
+          "bytes": 24558,
+          "sha256": "50792a0e2c22831d843c7fe461c2a41c2c631923fe3ecbf77b811da3e7ab511f"
+        }
+      ]
+    },
+    {
+      "id": "illus-notification",
+      "kind": "illustration",
+      "source": "outputs/videos/pilovo-nouveautes/assets/generated/nouveautes-07-notification.png",
+      "provenance": "Flat brand illustration generated with ChatGPT from the Pilovo brand prompts (ink, olive, ivory, limestone; no text). Editorial image, not a product screenshot.",
+      "crop": {
+        "width": 1505,
+        "height": 941,
+        "x": 167,
+        "y": 0
+      },
+      "files": [
+        {
+          "path": "media/illus-notification-480.webp",
+          "width": 480,
+          "height": 300,
+          "bytes": 3580,
+          "sha256": "2b32e7e469ea4191c53c2b39d3f0b206f960b914366e282c895f15966bf55e0c"
+        },
+        {
+          "path": "media/illus-notification-720.webp",
+          "width": 720,
+          "height": 450,
+          "bytes": 5586,
+          "sha256": "abbbc78a7c3d1eb11ea3d5660bbd833d660bc48f2b04148873b7edc3b527a10d"
+        },
+        {
+          "path": "media/illus-notification-960.webp",
+          "width": 960,
+          "height": 600,
+          "bytes": 7908,
+          "sha256": "8b887f48d0f83671858b22b756bf98e2e9ad70b45724e172a29276ffaa47d38b"
+        }
+      ]
+    },
+    {
+      "id": "tour-en",
+      "kind": "video",
+      "source": "outputs/videos/pilovo-site-tour/renders/tour-en.mp4",
+      "provenance": "20-second silent loop of the README tour, re-rendered for the website without the caption dash and the named-row frame, with sentence-case labels and no chapter numbers; H.264 CRF 28 and VP9 CRF 40 at 1280x720. Actual Pilovo interface rendered from the synthetic UI harness; synthetic local activity, not a real provider session. Unreleased screens are labeled in the video.",
+      "released": false,
+      "synthetic": true,
+      "crop": null,
+      "files": [
+        {
+          "path": "media/tour-en.mp4",
+          "width": 1280,
+          "height": 720,
+          "bytes": 1233339,
+          "sha256": "96d8cd0dfe483dc5e9e1111cbd9367b77458bc09356185b71c8a295092676ee8"
+        },
+        {
+          "path": "media/tour-en.webm",
+          "width": 1280,
+          "height": 720,
+          "bytes": 1428708,
+          "sha256": "f98445784d5fec4318398e02454a5aa01e19c2697637459e7436bf6507b5ea47"
+        }
+      ]
+    },
+    {
+      "id": "tour-poster-en",
+      "kind": "poster",
+      "source": "outputs/videos/pilovo-site-tour/renders/tour-en.mp4 at 4.0 s",
+      "provenance": "Frame of the tour video showing the activity view and its synthetic-data footer.",
+      "released": false,
+      "synthetic": true,
+      "crop": null,
+      "files": [
+        {
+          "path": "media/tour-poster-en.webp",
+          "width": 1280,
+          "height": 720,
+          "bytes": 21622,
+          "sha256": "3b214d4d63b87c4041680dd3893d6d6b4257c5e35a4a4b60e5dbe9b4bb045126"
+        }
+      ]
+    },
+    {
+      "id": "tour-fr",
+      "kind": "video",
+      "source": "outputs/videos/pilovo-site-tour/renders/tour-fr.mp4",
+      "provenance": "20-second silent loop of the README tour, re-rendered for the website without the caption dash and the named-row frame, with sentence-case labels and no chapter numbers; H.264 CRF 28 and VP9 CRF 40 at 1280x720. Actual Pilovo interface rendered from the synthetic UI harness; synthetic local activity, not a real provider session. Unreleased screens are labeled in the video.",
+      "released": false,
+      "synthetic": true,
+      "crop": null,
+      "files": [
+        {
+          "path": "media/tour-fr.mp4",
+          "width": 1280,
+          "height": 720,
+          "bytes": 1332474,
+          "sha256": "37ed5e77395b0c0a4b8fb2ee3ee90f769734532085adaa0237d8c8458ed2027d"
+        },
+        {
+          "path": "media/tour-fr.webm",
+          "width": 1280,
+          "height": 720,
+          "bytes": 1613587,
+          "sha256": "4283cb2cb87861a983cae4da16274f35b25b048fa4aa18000a055366c3c1c907"
+        }
+      ]
+    },
+    {
+      "id": "tour-poster-fr",
+      "kind": "poster",
+      "source": "outputs/videos/pilovo-site-tour/renders/tour-fr.mp4 at 4.0 s",
+      "provenance": "Frame of the tour video showing the activity view and its synthetic-data footer.",
+      "released": false,
+      "synthetic": true,
+      "crop": null,
+      "files": [
+        {
+          "path": "media/tour-poster-fr.webp",
+          "width": 1280,
+          "height": 720,
+          "bytes": 24894,
+          "sha256": "6ca8d1fb4f0c83962516bd3acbb69b413484bf1ba6f02d918c1b104ce33fb180"
+        }
+      ]
+    },
+    {
+      "id": "favicon-32",
+      "kind": "brand",
+      "source": "docs/media/pilovo-icon512.png",
+      "provenance": "Icon fallback scaled from pilovo-icon512.png.",
+      "crop": null,
+      "files": [
+        {
+          "path": "brand/favicon-32.png",
+          "width": 32,
+          "height": 32,
+          "bytes": 1106,
+          "sha256": "cffeae8ec00d1039de4b8890cc117e7e0316f0f1f4ec3dee7cf44ad55a6a0a57"
+        }
+      ]
+    },
+    {
+      "id": "apple-touch-icon",
+      "kind": "brand",
+      "source": "docs/media/pilovo-icon512.png",
+      "provenance": "Touch icon rendered from pilovo-icon512.png on ivory #F6F4EE.",
+      "crop": null,
+      "files": [
+        {
+          "path": "brand/apple-touch-icon.png",
+          "width": 180,
+          "height": 180,
+          "bytes": 5275,
+          "sha256": "4c55221d04b336dc7114bc00d389f72031dfe7470da3e90960e030926ab9601f"
+        }
+      ]
+    }
+  ]
+}

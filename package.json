@@ -16,7 +16,10 @@
     "package": "node scripts/package-briefoak.mjs --create",
     "package:check": "node scripts/package-briefoak.mjs --check",
     "test:publication": "node --test scripts/publication.test.mjs",
-    "check:publication": "node scripts/check-publication.mjs"
+    "check:publication": "node scripts/check-publication.mjs",
+    "build:site": "node scripts/build-site.mjs",
+    "test:site": "node --test scripts/site.test.mjs",
+    "site:media": "node scripts/site-media.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "latest",
@@ -28,6 +31,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "latest",
+    "@fontsource-variable/montserrat": "5.3.0",
     "@playwright/test": "latest",
     "@types/chrome": "latest",
     "@types/node": "latest",
@@ -36,8 +40,8 @@
     "@vitejs/plugin-react": "latest",
     "esbuild": "latest",
     "fake-indexeddb": "latest",
-    "typescript": "latest",
     "tsx": "latest",
+    "typescript": "latest",
     "vite": "latest",
     "vitest": "latest"
   },
