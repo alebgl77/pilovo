@@ -2,7 +2,7 @@
 
 [English](faq.md) · Français · [README en français](README.fr.md)
 
-Réponses sur la préversion 0.4.0 de Pilovo. Les fonctions marquées non publiées existent seulement dans les sources actuelles : compilez les sources pour les utiliser. Dernière revue : 11 octobre 2026.
+Réponses sur la préversion 0.4.0 de Pilovo. Les fonctions marquées non publiées existent seulement dans les sources actuelles : compilez les sources pour les utiliser. Dernière revue : 11 novembre 2026.
 
 ## À propos de Pilovo
 
@@ -132,7 +132,7 @@ Non : Pilovo affiche l'état observé, ramène le bon onglet au premier plan et 
 
 ### Pilovo peut-il garder un onglet ChatGPT ou Claude actif en arrière-plan ?
 
-Non : Chrome peut ralentir ou décharger les onglets en arrière-plan, et Pilovo, une extension Chrome qui se contente d'observer des indicateurs d'état, n'y change rien. Quand la preuve expire, la ligne affiche **Observation interrompue** plutôt qu'une supposition.
+Non : Chrome peut ralentir ou décharger les onglets en arrière-plan, et Pilovo, une extension Chrome qui se contente d'observer des indicateurs d'état, n'y change rien. Quand la preuve expire, la ligne affiche **Observation interrompue** plutôt qu'une supposition. Dans les sources actuelles (non publié ; depuis les sources), le service worker de Pilovo relit lui-même un onglet tant qu'un travail y est observé ou qu'un élément à vérifier n'a pas été vu : ces deux états tiennent donc en arrière-plan, sans que Pilovo garde pour autant la page active.
 
 ### Pilovo peut-il exporter ou sauvegarder mes conversations ChatGPT ou Claude ?
 

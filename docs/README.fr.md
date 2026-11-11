@@ -17,7 +17,7 @@ La version 0.4.0 est une préversion expérimentale pour Chrome 120 ou plus réc
 
 ## Pilovo en bref
 
-L'essentiel de la version 0.4.0. Dernière revue : 11 octobre 2026.
+L'essentiel de la version 0.4.0. Dernière revue : 11 novembre 2026.
 
 | Élément | Pilovo 0.4.0 |
 | --- | --- |
@@ -68,6 +68,8 @@ Ces fonctions existent dans les sources actuelles, pas dans la version 0.4.0 : c
 - **Durées écoulées**, par exemple *En cours depuis 4 min* : à la minute près, jamais enregistrées, elles repartent de zéro quand la preuve est perdue. [Détails](installation.fr.md#durées-écoulées)
 - **Numéros de session stables, positions et noms** : des numéros qui ne changent plus quand d'autres onglets se ferment, et un nom de 40 caractères au plus, gardé en mémoire tant que l'onglet reste ouvert, jamais enregistré ni exporté. [Détails](installation.fr.md#numéros-positions-et-noms-des-sessions)
 - **Couleurs et résumé du badge** : le nombre prend la couleur du motif le plus urgent, « … » signale un travail observé, et l'info-bulle de l'icône ne donne que des nombres et des mots fixes. [Détails](installation.fr.md#couleurs-et-résumé-du-badge)
+- **Renouvellement de la preuve en arrière-plan** : le service worker de Pilovo relit lui-même un onglet tant qu'un travail y est observé ou qu'un élément à vérifier n'a pas été vu ; ces deux états tiennent ainsi quand l'onglet est en arrière-plan, où Chrome ralentit les minuteries de la page. [Détails](installation.fr.md#renouvellement-de-la-preuve-en-arrière-plan)
+- **Compteurs de qualité des observations** : dans **Paramètres** › **Diagnostic local**, le décompte des annonces de Pilovo et des preuves qu'il a perdues pendant cette session de Chrome ; des nombres seulement, gardés en mémoire, pas un taux de fiabilité. [Détails](installation.fr.md#compteurs-de-qualité-des-observations)
 
 ## Compatibilité de la préversion
 
@@ -96,7 +98,7 @@ Les règles, abonnements et quotas de votre compte chez le fournisseur restent a
 
 Pilovo ne demande jamais la permission `tabs`, l'accès à tous les sites ni `nativeMessaging`.
 
-L'observateur isolé est activé uniquement sur le site autorisé. Il examine des contrôles et indicateurs d'état du DOM, sans collecter les consignes, réponses complètes, titres d'onglets, captures, cookies ou identifiants de connexion. Les métadonnées d'activité sont locales et temporaires ; elles sont reconstruites avec des preuves fraîches après redémarrage. Les noms de session que vous saisissez (non publiés) restent dans cette mémoire le temps de vie de leur onglet, sans jamais être enregistrés ni exportés. Le « Vu » automatique facultatif (non publié, désactivé par défaut) lit seulement quel onglet est actif dans la fenêtre active, sous forme d'identifiants et d'indicateurs gardés en mémoire. Les notifications système facultatives (non publiées, désactivées par défaut) contiennent seulement le service, le motif et le numéro de session ; votre système peut les conserver dans son centre de notifications. Ni backend, ni API de modèle, ni télémétrie distante, ni synchronisation cloud. Le retrait d'accès invalide l'observation ; le bail local impose une coupure logique sous 15 secondes, même si Chrome retarde le nettoyage. Voir la [notice de confidentialité](privacy.md) et le [contrat technique](core-contract.md), tous deux en anglais.
+L'observateur isolé est activé uniquement sur le site autorisé. Il examine des contrôles et indicateurs d'état du DOM, sans collecter les consignes, réponses complètes, titres d'onglets, captures, cookies ou identifiants de connexion. Les métadonnées d'activité sont locales et temporaires ; elles sont reconstruites avec des preuves fraîches après redémarrage. Les noms de session que vous saisissez (non publiés) restent dans cette mémoire le temps de vie de leur onglet, sans jamais être enregistrés ni exportés. Le « Vu » automatique facultatif (non publié, désactivé par défaut) lit seulement quel onglet est actif dans la fenêtre active, sous forme d'identifiants et d'indicateurs gardés en mémoire. Les notifications système facultatives (non publiées, désactivées par défaut) contiennent seulement le service, le motif et le numéro de session ; votre système peut les conserver dans son centre de notifications. Les compteurs de qualité des observations (non publiés) sont de simples nombres, gardés dans la mémoire de session de Chrome jusqu'à sa fermeture, jamais écrits sur le disque ni exportés. Ni backend, ni API de modèle, ni télémétrie distante, ni synchronisation cloud. Le retrait d'accès invalide l'observation ; le bail local impose une coupure logique sous 15 secondes, même si Chrome retarde le nettoyage. Voir la [notice de confidentialité](privacy.md) et le [contrat technique](core-contract.md), tous deux en anglais.
 
 ## Questions fréquentes
 

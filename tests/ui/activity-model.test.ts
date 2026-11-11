@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { WebActivityObservation, WebActivitySnapshot } from '../../src/shared/activity';
-import { canLabel, currentObservations, ELAPSED_TICK, formatElapsed, labelChange, needsAttention, nextElapsedTick, sessionHeading, sessionPlace, shortcutLabel, stateElapsed } from '../../src/ui/activityModel';
+import { canLabel, currentObservations, ELAPSED_TICK, formatElapsed, labelChange, needsAttention, nextElapsedTick, sessionHeading, sessionPlace, shortcutLabel, stateElapsed, totalQuality } from '../../src/ui/activityModel';
 import { emptyWebDiscovery } from '../../src/shared/web';
 
 const record = (patch: Partial<WebActivityObservation> = {}): WebActivityObservation => ({ id: 'session-a', provider: 'claude-web', tabId: 12, windowId: 1, sessionNumber: 1, state: 'attention', attention: { id: 'event-a', reason: 'response_ready', acknowledged: false, raisedAt: 900 }, provenance: 'observed_ui', observedAt: 1000, validUntil: 2000, stateSince: 900, ...patch });
@@ -135,5 +135,11 @@ describe('stable session identity in rows', () => {
     expect(labelChange(` ${'x'.repeat(40)} `)).toBe('x'.repeat(40));
     for (const draft of ['', '   ', '\t']) expect(labelChange(draft)).toBeNull();
     for (const draft of ['x'.repeat(41), 'a\u0007b', 'a\tb', 'a\u202Eb', 'a\u2066b', 'a\u0085b']) expect(labelChange(draft), JSON.stringify(draft)).toBeUndefined();
+  });
+  it('adds observation quality counters across services and shows none without a worker', () => {
+    const counts = { announced: 3, resumed: 1, dropped: 0, interrupted: 2, unobserved: 1 };
+    expect(totalQuality({ 'claude-web': counts, 'chatgpt-web': { announced: 4, resumed: 0, dropped: 2, interrupted: 0, unobserved: 0 } })).toEqual({ announced: 7, resumed: 1, dropped: 2, interrupted: 2, unobserved: 1 });
+    // The preview and fixtures carry no counters: the Settings block is then hidden rather than showing zeros.
+    expect(totalQuality(snapshot().quality)).toBeNull(); expect(totalQuality(undefined)).toBeNull();
   });
 });

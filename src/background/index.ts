@@ -62,6 +62,8 @@ const ready = (async () => {
   await repository.setConnection('claude-code', 'disconnected'); await repository.setConnection('codex', 'disconnected');
   await chrome.alarms.create('hub-maintenance', { periodInMinutes: 1 });
   await chrome.alarms.create('pilovo-activity', { periodInMinutes: 0.5 });
+  // Before observing: the observation quality counters of this browser session, kept in memory by Chrome.
+  await activity.restoreQuality();
   activity.start();
 })();
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond: (response: ApiResult<unknown>) => void) => {

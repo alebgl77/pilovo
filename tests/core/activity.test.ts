@@ -3,8 +3,17 @@ import { WebActivity, type ActivityAccess, type ActivityView } from '../../src/b
 import { makeUnknown, newActivityRecord, reduceActivity } from '../../src/background/activity-reducer';
 import { BADGE_COLORS, BADGE_TEXT_COLOR } from '../../src/background/activity-badge';
 import { NOTICE_GRACE, NOTICE_LIMIT, NOTICE_RESAMPLE, NOTIFIED_LIMIT, noticeId, parseNoticeId, remember, type ActivityNotice } from '../../src/background/activity-notifications';
-import { activityHintSchema, activitySampleSchema, ACTIVITY_TTL, type ActivityEvidence, type ActivityLease } from '../../src/shared/activity';
+import { ACTIVITY_RENEWAL_MAX, ACTIVITY_RESUME_WINDOW, activityHintSchema, activityRenewalDelay, activitySampleSchema, ACTIVITY_TTL, type ActivityEvidence, type ActivityLease } from '../../src/shared/activity';
+import { QUALITY_KEY, storedQualitySchema, type StoredQuality } from '../../src/background/activity-quality';
 import type { WebTab } from '../../src/platform/web';
+
+// The worker renews by itself the evidence of a working tab and of an unseen item to review. A test that follows hints, the
+// per-tab rate bound or the expiry watchdog alone holds that renewal back, as when the device sleeps through it.
+const renewal = vi.hoisted(() => ({ held: false }));
+vi.mock('../../src/shared/activity', async original => {
+  const actual = await original<typeof import('../../src/shared/activity')>();
+  return { ...actual, activityRenewalDelay: (working?: number) => renewal.held ? 2_000_000_000 : actual.activityRenewalDelay(working) };
+});
 
 describe('conservative activity reducer', () => {
   it('requires witnessed work and two uninterrupted positive reads one second apart', () => {
@@ -90,6 +99,7 @@ const row = () => activity.snapshot().observations[0];
 const painted = () => vi.mocked(access.badge).mock.lastCall?.[0];
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; };
 beforeEach(() => {
+  renewal.held = false;
   vi.useFakeTimers(); now = 1_000_000; evidence = 'working'; documentId = 'chrome-document'; activationId = crypto.randomUUID();
   access = {
     runtimeId: 'extension', now: () => now, wall: () => 1234,
@@ -99,6 +109,7 @@ beforeEach(() => {
     focus: vi.fn(async (_provider, _tabId, current) => { if (!current()) throw new Error('expired'); }), badge: vi.fn(async () => undefined), notify: vi.fn(),
     viewing: vi.fn(async () => undefined),
     canNotify: vi.fn(async () => false), showNotification: vi.fn(async () => undefined), clearNotification: vi.fn(async () => undefined), shownNotifications: vi.fn(async () => []),
+    readQuality: vi.fn(async () => undefined), writeQuality: vi.fn(async () => undefined),
   };
   activity = new WebActivity(access);
 });
@@ -140,6 +151,7 @@ describe('leased worker observations', () => {
     await expect(activity.focus(row().id)).rejects.toMatchObject({ code: 'navigation.expired' });
   });
   it.each([['working', '…', 'Pilovo — 1 en cours'], ['input_required', '1', 'Pilovo — 1 à vérifier (intervention demandée)']] as const)('clears a %s badge at expiry by the watchdog alone, on a fractional clock', async (value, text, title) => {
+    renewal.held = true;
     // The real clock is fractional and setTimeout truncates its delay, so a watchdog armed on the exact remaining time can
     // run a fraction of a millisecond before validUntil. Here the clock follows the fake timers and each sample takes 0.4 ms.
     const start = Date.now(); let latency = 0.5;
@@ -268,6 +280,7 @@ describe('leased worker observations', () => {
     await expect(activity.focus(oldId)).rejects.toMatchObject({ code: 'navigation.expired' }); expect(access.focus).not.toHaveBeenCalled();
   });
   it('routine hints arriving while focus waits for the rate bound cannot take its sample slot', async () => {
+    renewal.held = true;
     // Real conditions: fractional monotonic time and executeScript latency. A hint's truncated delay used to arm a
     // routine sample about 1 ms before focus woke, still in flight when focus checked the slot (navigation.changed).
     const reply = vi.mocked(access.sample).getMockImplementation()!;
@@ -344,6 +357,7 @@ describe('next attention and mark all as seen', () => {
     expect(focused()).toEqual([3, 1]); expect(byTab(1).attention!.acknowledged).toBe(false);
   });
   it('skips expired attention and never focuses it', async () => {
+    renewal.held = true;
     activity.start(); await tick();
     await raise(1, 'input_required'); await tick(10_000); await raise(2, 'error_visible'); await tick(4_500);
     expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' }); expect(byTab(2).state).toBe('attention');
@@ -370,6 +384,7 @@ describe('next attention and mark all as seen', () => {
     expect(access.focus).not.toHaveBeenCalled(); expect(vi.mocked(access.sample).mock.calls.length).toBe(samples + 1);
   });
   it('keeps the earliest candidate when a routine sample timer is already armed for its tab', async () => {
+    renewal.held = true;
     let slow = false;
     vi.mocked(access.sample).mockImplementation(async (tabId, lease) => {
       if (slow) await new Promise(resolve => setTimeout(resolve, 40));
@@ -386,6 +401,7 @@ describe('next attention and mark all as seen', () => {
     expect(vi.mocked(access.sample).mock.calls.length).toBe(samples + 1);
   });
   it('a focus attempt that fails after its rate wait still serves the routine sample it displaced', async () => {
+    renewal.held = true;
     activity.start(); await tick(); await raise(1, 'input_required');
     activity.updateTab(1, {}, tabOf(1)); await tick(); await tick(300); activity.updateTab(1, {}, tabOf(1));
     const samples = vi.mocked(access.sample).mock.calls.length;
@@ -469,6 +485,7 @@ describe('differentiated toolbar badge', () => {
     expect(JSON.stringify(vi.mocked(access.badge).mock.calls)).not.toMatch(/PRIVATE_URL|https:|chatgpt|ChatGPT|session|document-|[0-9a-f]{8}-[0-9a-f]{4}-/);
   });
   it('downgrades through the expiry watchdog, and clears after revoke, tab close or a worker restart', async () => {
+    renewal.held = true;
     // Each sample runs at `tick()` time (the tab's 1 s rate window has passed), so the watchdog is armed on the test clock.
     const sampleNow = async (tabId: number, value: ActivityEvidence) => { evidenceFor.set(tabId, value); activity.updateTab(tabId, {}, tabOf(tabId)); await tick(); };
     activity.start(); await tick(); await tick(1000); await sampleNow(1, 'error_visible'); await sampleNow(2, 'working');
@@ -631,6 +648,7 @@ describe('stable session identity: numbers, positions and labels', () => {
     slow.resolve({ ...tabOf(1), index: 3 }); await older; expect(byTab(1)!.tabIndex).toBe(9);
   });
   it('keeps a label on its own tab only, in memory, without ever painting it on the badge or its title', async () => {
+    renewal.held = true;
     activity.start(); await tick(); await open(1, gpt(1)); await open(2, gpt(2));
     vi.mocked(access.notify).mockClear();
     activity.label(byTab(1)!.id, '  Revue PRIVATE_LABEL_CANARY  ');
@@ -772,6 +790,8 @@ describe('optional automatic seen after dwelling on the tab', () => {
     await tick(1); expect(acknowledge).toHaveBeenCalledExactlyOnceWith(byTab(1)!.id, replaced.id); expect(byTab(1)!.attention).toEqual({ ...replaced, acknowledged: true });
   });
   it.each(['closure', 'revocation', 'manual seen', 'mark all', 'expiry'] as const)('stops on %s and acknowledges nothing at the deadline', async change => {
+    // Expiry needs the worker's own renewal held back: otherwise an unseen item's evidence is renewed before it lapses.
+    renewal.held = change === 'expiry';
     activity.setAutoAcknowledge(change === 'expiry' ? 30 : 5); activity.start(); await tick(); await raise(1, 'input_required');
     await look(1); await keep(3000); const before = asked();
     const acknowledge = vi.spyOn(activity, 'acknowledge');
@@ -779,7 +799,7 @@ describe('optional automatic seen after dwelling on the tab', () => {
     else if (change === 'revocation') activity.revoke('chatgpt-web');
     else if (change === 'manual seen') activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id);
     else if (change === 'mark all') activity.acknowledgeAll();
-    // Expiry: no heartbeat renews the evidence, which lapses 15 s after the last sample, before the 30 s deadline.
+    // Expiry: nothing renews the evidence, which lapses 15 s after the last sample, before the 30 s deadline.
     await (change === 'expiry' || change === 'closure' || change === 'revocation' ? tick(40_000) : keep(40_000));
     expect(acknowledge).toHaveBeenCalledTimes(change === 'manual seen' ? 1 : 0); expect(asked()).toBe(before);
     if (change === 'manual seen' || change === 'mark all') expect(seen(1)).toBe(true);
@@ -787,6 +807,7 @@ describe('optional automatic seen after dwelling on the tab', () => {
     else expect(byTab(1)).toBeUndefined();
   });
   it('requires evidence still live at the deadline: a deadline exactly at validUntil acknowledges nothing', async () => {
+    renewal.held = true;
     activity.setAutoAcknowledge(15); activity.start(); await tick(); await raise(1, 'input_required');
     await look(1); expect(byTab(1)!.validUntil).toBe(now + 15_000);
     await tick(15_000); expect(byTab(1)).toMatchObject({ state: 'unknown', unknownReason: 'expired' }); expect(byTab(1)!.attention).toBeUndefined();
@@ -984,6 +1005,7 @@ describe('optional OS notifications', () => {
     activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id); await tick(); expect(cleared()).toEqual([]);
   });
   it('keeps a notification through lapses of its evidence, standing for the same reason raised again in its tab, without notifying twice', async () => {
+    renewal.held = true;
     activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'error_visible');
     const first = idOf(1), firstAttention = byTab(1)!.attention!.id;
     // A throttled background tab: its evidence expires, and the next activity alarm samples the same error as a new identity.
@@ -1018,6 +1040,7 @@ describe('optional OS notifications', () => {
     expect(created()).toHaveLength(2); expect([...displayed.keys()]).toEqual([idOf(1)]);
   });
   it('clears a lapsed notification when its grace period ends without the same reason, or at once on other evidence or settings', async () => {
+    renewal.held = true;
     activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required'); await raise(2, 'input_required');
     const id = idOf(1), other = idOf(2), deadline = byTab(1)!.validUntil;
     // Tab 2 keeps being sampled; tab 1 is not sampled again after its evidence expires.
@@ -1038,6 +1061,7 @@ describe('optional OS notifications', () => {
     }
   });
   it('a click on a notification that outlived a lapse focuses the attention it now stands for, sampling the tab first while it is lapsed', async () => {
+    renewal.held = true;
     activity.setNotifyProviders(['chatgpt-web']); activity.start(); await tick(); await raise(1, 'input_required');
     const acknowledge = vi.spyOn(activity, 'acknowledge'), focus = vi.spyOn(activity, 'focus');
     // Rebound after a lapse: the ID still names the first identity, the click focuses the current one.
@@ -1090,3 +1114,137 @@ describe('optional OS notifications', () => {
     activity.acknowledge(byTab(1)!.id, byTab(1)!.attention!.id); await tick(); expect(cleared()).toEqual([]);
   });
 });
+
+// Time passes in small steps so that the clock the worker reads follows its timers, as it does in Chrome.
+const pass = async (ms: number, step = 250) => { for (let elapsed = 0; elapsed < ms; elapsed += step) await tick(step); };
+const sampled = () => vi.mocked(access.sample).mock.calls.length;
+
+describe('worker-side evidence renewal', () => {
+  it('follows the time already spent working, between one and ten seconds, inside the evidence lifetime', () => {
+    expect([0, 3_999, 4_000, 8_000, 20_000, 40_000, 3_600_000].map(working => activityRenewalDelay(working))).toEqual([1_000, 1_000, 1_000, 2_000, 5_000, 10_000, 10_000]);
+    // An unseen item to review is renewed at the slowest pace. Two samples of 2 s at most still fit before expiry.
+    expect(activityRenewalDelay()).toBe(ACTIVITY_RENEWAL_MAX); expect(ACTIVITY_RENEWAL_MAX + 2 * 2_000).toBeLessThan(ACTIVITY_TTL);
+  });
+  it('keeps witnessed work and announces its end with no hint from the page', async () => {
+    // A background tab: Chrome throttles its timers, so no hint arrives. Before renewal, this evidence expired after 15 s,
+    // the witness was lost and the end of the run was never announced.
+    const times: number[] = [], reply = vi.mocked(access.sample).getMockImplementation()!;
+    vi.mocked(access.sample).mockImplementation(async (tabId, lease) => { times.push(now); return reply(tabId, lease); });
+    activity.start(); await tick(); const started = row().stateSince;
+    await pass(90_000);
+    expect(row()).toMatchObject({ state: 'working', stateSince: started }); expect(painted()).toMatchObject({ text: '…' });
+    // Each gap is the renewal delay, rounded up to this test's 250 ms step: about a second at first, never above the
+    // maximum, never shrinking.
+    const gaps = times.slice(1).map((time, index) => time - times[index]), step = 250;
+    expect(gaps[0]).toBeGreaterThanOrEqual(1_000); expect(gaps[0]).toBeLessThanOrEqual(1_000 + step);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(ACTIVITY_RENEWAL_MAX + step); expect(gaps.at(-1)).toBeGreaterThanOrEqual(ACTIVITY_RENEWAL_MAX);
+    for (let index = 1; index < gaps.length; index++) expect(gaps[index]).toBeGreaterThanOrEqual(gaps[index - 1] - step);
+    // Far fewer samples than one per second, and the page sent nothing.
+    expect(times.length).toBeLessThan(25);
+    evidence = 'idle_ready'; await pass(ACTIVITY_RENEWAL_MAX + 2_000);
+    expect(row()).toMatchObject({ state: 'attention', attention: { reason: 'response_ready', acknowledged: false } }); expect(painted()).toMatchObject({ text: '1' });
+  });
+  it('keeps an unseen item to review live until it is seen, then lets its evidence expire', async () => {
+    activity.start(); await tick(); evidence = 'idle_ready'; await pass(3_000);
+    const item = row(); expect(item.attention).toMatchObject({ reason: 'response_ready', acknowledged: false });
+    await pass(180_000);
+    expect(row()).toMatchObject({ id: item.id, state: 'attention', attention: { id: item.attention!.id, acknowledged: false } }); expect(painted()).toMatchObject({ text: '1' });
+    activity.acknowledge(item.id, item.attention!.id); const seen = sampled();
+    // At most the renewal already armed runs; nothing renews a seen item, so its evidence then lapses.
+    await pass(ACTIVITY_RENEWAL_MAX + ACTIVITY_TTL + 1_000);
+    expect(sampled() - seen).toBeLessThanOrEqual(1); expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
+  });
+  it('does not renew a tab at rest', async () => {
+    evidence = 'idle_ready'; activity.start(); await tick(); expect(row().state).toBe('idle'); const before = sampled();
+    await pass(ACTIVITY_TTL + 1_000);
+    expect(sampled()).toBe(before); expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
+  });
+  it.each(['navigation', 'closure', 'revocation'] as const)('stops with %s', async change => {
+    activity.start(); await tick(); await pass(3_000); expect(row().state).toBe('working');
+    if (change === 'navigation') activity.invalidateTab(1); else if (change === 'closure') activity.invalidateTab(1, true); else activity.revoke('chatgpt-web');
+    await tick(); const before = sampled();
+    await pass(30_000); expect(sampled()).toBe(before);
+  });
+  it('gives each renewal its own 15 s lease and leaves the lifetime of the evidence unchanged', async () => {
+    activity.start(); await tick(); await pass(30_000);
+    for (const [, lease] of vi.mocked(access.sample).mock.calls) expect(lease.expiresAt - lease.issuedAt).toBe(ACTIVITY_TTL);
+    expect(row().validUntil - now).toBeLessThanOrEqual(ACTIVITY_TTL);
+  });
+});
+
+describe('observation quality counters', () => {
+  const zero = { announced: 0, resumed: 0, dropped: 0, interrupted: 0, unobserved: 0 };
+  const quality = () => activity.snapshot().quality!['chatgpt-web'];
+  let sequence: number;
+  beforeEach(() => { sequence = 0; });
+  // One sample of the tab, requested by a page hint, with the evidence given.
+  const read = async (value: ActivityEvidence) => { evidence = value; await activity.hint(hint(++sequence), sender()); await tick(1000); };
+  const announce = async () => { await read('working'); await read('idle_ready'); await tick(1000); expect(row().attention).toMatchObject({ reason: 'response_ready', acknowledged: false }); };
+  it('counts an announcement, and work observed again only when it follows within five seconds', async () => {
+    activity.start(); await tick(); expect(quality()).toEqual(zero);
+    await announce(); expect(quality()).toEqual({ ...zero, announced: 1 });
+    await pass(ACTIVITY_RESUME_WINDOW); await read('working'); expect(quality()).toEqual({ ...zero, announced: 1 });
+    await read('idle_ready'); await tick(1000); expect(quality()).toEqual({ ...zero, announced: 2 });
+    await read('working'); expect(row().state).toBe('working'); expect(quality()).toEqual({ ...zero, announced: 2, resumed: 1 });
+    // A snapshot carries a copy: counters cannot be changed through it.
+    activity.snapshot().quality!['chatgpt-web'].announced = 99; expect(quality().announced).toBe(2);
+    expect(activity.snapshot().quality!['claude-web']).toEqual(zero);
+  });
+  it('counts an unseen announcement that loses its evidence, not a seen one', async () => {
+    renewal.held = true; activity.start(); await tick();
+    await announce(); await pass(ACTIVITY_TTL + 1_000); expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'expired' });
+    expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1 });
+    await announce(); const item = row(); activity.acknowledge(item.id, item.attention!.id); await pass(ACTIVITY_TTL + 1_000);
+    expect(row().state).toBe('unknown'); expect(quality()).toEqual({ ...zero, announced: 2, dropped: 1 });
+  });
+  it('counts evidence lost during work, and the end of that run when the tab is then found at rest', async () => {
+    renewal.held = true; activity.start(); await tick(); expect(row().state).toBe('working');
+    await pass(ACTIVITY_TTL + 1_000); expect(quality()).toEqual({ ...zero, interrupted: 1 });
+    await read('idle_ready'); expect(row().state).toBe('idle'); expect(quality()).toEqual({ ...zero, interrupted: 1, unobserved: 1 });
+    // Nothing more for that run, however long the tab stays at rest.
+    await read('idle_ready'); await pass(ACTIVITY_TTL + 1_000); await read('idle_ready'); expect(quality()).toEqual({ ...zero, interrupted: 1, unobserved: 1 });
+    // Work found still running after the loss is no missed end, and an explicit request is a conclusive reading.
+    await read('working'); await pass(ACTIVITY_TTL + 1_000); expect(quality()).toEqual({ ...zero, interrupted: 2, unobserved: 1 });
+    await read('working'); await read('input_required'); expect(row().state).toBe('attention'); expect(quality()).toEqual({ ...zero, interrupted: 2, unobserved: 1 });
+  });
+  it('counts a reading with no recognized signal and an unreadable tab as lost evidence', async () => {
+    activity.start(); await tick();
+    await read('unknown'); expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'no_evidence' }); expect(quality()).toEqual({ ...zero, interrupted: 1 });
+    await announce(); await read('unknown'); expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1, interrupted: 1 });
+    await read('working'); vi.mocked(access.sample).mockRejectedValue(new Error('unreadable')); await activity.hint(hint(++sequence), sender()); await tick(1000);
+    // The failed sample leaves the row unknown at once (a snapshot then reports that evidence as expired); counted once.
+    expect(row().state).toBe('unknown'); expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1, interrupted: 2 });
+    await pass(ACTIVITY_TTL + 1_000); expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1, interrupted: 2 });
+  });
+  it('does not count navigation, closure or a seen item as a loss, and forgets a service with its grant', async () => {
+    renewal.held = true; activity.start(); await tick();
+    activity.invalidateTab(1); await read('idle_ready'); expect(quality()).toEqual(zero);
+    await announce(); activity.invalidateTab(1); await read('idle_ready'); expect(quality()).toEqual({ ...zero, announced: 1 });
+    await read('working'); activity.invalidateTab(1, true); await tick(); expect(quality()).toEqual({ ...zero, announced: 1 });
+    activity.revoke('chatgpt-web'); await tick(); expect(quality()).toEqual(zero);
+  });
+  it('writes nothing before restoring, then adds what the browser session holds and counts what the last worker life lost', async () => {
+    const service = (counts: Partial<typeof zero> = {}, live = { working: 0, unseen: 0 }) => ({ counts: { ...zero, ...counts }, live });
+    const stored: StoredQuality = { version: 1, services: { 'claude-web': service(), 'chatgpt-web': service({ announced: 7, resumed: 1, dropped: 2 }, { working: 2, unseen: 1 }) } };
+    vi.mocked(access.readQuality).mockResolvedValue(stored);
+    activity.start(); await tick(); await announce(); expect(access.writeQuality).not.toHaveBeenCalled();
+    await activity.restoreQuality(); await tick();
+    // The previous worker life ended holding two working tabs and one unseen announcement: all three were discarded with it.
+    expect(quality()).toEqual({ announced: 8, resumed: 1, dropped: 3, interrupted: 2, unobserved: 0 });
+    const written = () => vi.mocked(access.writeQuality).mock.lastCall![0];
+    expect(storedQualitySchema.safeParse(written()).success).toBe(true);
+    expect(written().services['chatgpt-web']).toEqual({ counts: quality(), live: { working: 0, unseen: 1 } }); expect(written().services['claude-web']).toEqual(service());
+    expect(JSON.stringify(written())).not.toMatch(/PRIVATE|https:|chrome-document|tabId/); expect(QUALITY_KEY).toBe('pilovo.activityQuality');
+    // Only a change is written: renewals of the unseen item alter nothing; restoring twice adds nothing.
+    const writes = vi.mocked(access.writeQuality).mock.calls.length;
+    await pass(30_000); await activity.restoreQuality(); expect(access.writeQuality).toHaveBeenCalledTimes(writes); expect(access.readQuality).toHaveBeenCalledOnce();
+    await read('working'); expect(written().services['chatgpt-web'].live).toEqual({ working: 1, unseen: 0 });
+  });
+  it.each([['a failed read', undefined], ['an unexpected value', { version: 1, services: { 'chatgpt-web': { counts: { announced: -1 } } } }], ['another version', { version: 2, services: {} }]])('starts from zero after %s', async (_name, value) => {
+    if (value === undefined) vi.mocked(access.readQuality).mockRejectedValue(new Error('no storage')); else vi.mocked(access.readQuality).mockResolvedValue(value);
+    await activity.restoreQuality(); activity.start(); await tick();
+    expect(quality()).toEqual(zero); await announce(); expect(quality()).toEqual({ ...zero, announced: 1 });
+    expect(vi.mocked(access.writeQuality).mock.lastCall![0].services['chatgpt-web']).toEqual({ counts: { ...zero, announced: 1 }, live: { working: 0, unseen: 1 } });
+  });
+});
+

@@ -4,7 +4,7 @@
 
 Pilovo 0.4.0 est une extension Chrome qui s'installe manuellement : téléchargez `Pilovo_Chrome_v0.4.0.zip` dans la [préversion v0.4.0 sur GitHub](https://github.com/alebgl77/pilovo/releases/tag/v0.4.0), décompressez-le, ouvrez `chrome://extensions`, activez le **Mode développeur**, puis cliquez sur **Charger l'extension non empaquetée** et sélectionnez le dossier qui contient `manifest.json`. Chrome 120 ou plus récent est requis. Pilovo n'est pas publié sur le Chrome Web Store et ne se met pas à jour automatiquement. Vous utilisez votre propre compte web ChatGPT ou Claude ; le cœur de Pilovo est gratuit sous licence MIT, sans compte Pilovo, clé API ni compagnon.
 
-Dernière revue : 11 octobre 2026.
+Dernière revue : 11 novembre 2026.
 
 ## Installer l'archive ZIP
 
@@ -87,3 +87,17 @@ Chaque ligne garde un numéro stable par service, par exemple **Claude · sessio
 Ces couleurs et ce résumé sont non publiés : ils sont disponibles en compilant les sources, pas dans l'archive 0.4.0.
 
 Le nombre prend la couleur du motif le plus urgent, rouge pour une erreur visible, brun ambré pour une intervention demandée, olive pour une réponse disponible. S'il n'y a rien à vérifier mais qu'un travail est observé, il affiche « … » sur fond gris, sans nombre ; les éléments vus, les sessions en attente et les états inconnus ne l'allument jamais. Au survol de l'icône Pilovo, le même résumé apparaît en texte, dans la langue choisie dans les paramètres de Pilovo, par exemple « Pilovo — 3 à vérifier, dont 1 erreur visible · 1 en cours ». Le badge et son info-bulle ne contiennent que des nombres et ces mots fixes, jamais de titre, d'adresse ni de contenu de conversation.
+
+### Renouvellement de la preuve en arrière-plan
+
+Ce renouvellement est non publié : il est disponible en compilant les sources, pas dans l'archive 0.4.0.
+
+L'observateur de Pilovo dans la page demande une nouvelle lecture quand la page change et toutes les 5 secondes, et une lecture est valable 15 secondes. Chrome ralentit les minuteries des onglets en arrière-plan, jusqu'à environ un réveil par minute. Sans renouvellement, l'état d'un onglet en arrière-plan peut donc expirer entre deux lectures : un travail observé perd son témoin, si bien que sa fin n'est pas annoncée, et un élément à vérifier que vous n'avez pas encore vu peut quitter la liste. Dans les sources actuelles, le service worker de l'extension, dont Chrome ne ralentit pas les minuteries selon la visibilité des onglets, relit lui-même l'onglet tant qu'un travail y est observé ou qu'un élément à vérifier n'a pas été marqué comme vu : environ chaque seconde au début d'un travail, puis moins souvent, toutes les 10 secondes au plus. Il lit les mêmes indicateurs d'état que toute autre lecture, avec les mêmes contrôles, et chaque lecture expire toujours après 15 secondes. Les onglets au repos, les onglets à l'état inconnu et les éléments déjà vus ne sont pas renouvelés. Chrome peut toujours figer ou décharger un onglet, ou arrêter le service worker : l'état devient alors **Observation interrompue** comme avant, et aucune garantie de temps réel n'est donnée. Tant qu'un tel onglet existe, le service worker reste actif.
+
+Mesure du 11 novembre 2026 avec Chrome for Testing 153, une page synthétique dans un onglet caché et le panneau fermé : sans renouvellement, un élément **Réponse disponible** quittait le badge 15 à 41 secondes après son apparition ; avec le renouvellement, il est resté pendant les 150 secondes observées. C'est une seule mesure synthétique, pas un essai sur une session d'un fournisseur ni un taux de fiabilité.
+
+### Compteurs de qualité des observations
+
+Ces compteurs sont non publiés : ils sont disponibles en compilant les sources, pas dans l'archive 0.4.0.
+
+**Paramètres** › **Diagnostic local** › **Observation des onglets** affiche cinq nombres pour la session de Chrome en cours, tous services confondus : les réponses annoncées ; les travaux observés de nouveau moins de 5 secondes après une annonce ; les annonces perdues avant d'être vues ; les preuves perdues pendant un travail ; les fins de travail non observées. Ils vous montrent, sur votre propre machine, comment l'observation se comporte, par exemple si des éléments à vérifier se perdent quand leurs onglets sont en arrière-plan. Ce sont des indications, pas un taux de fiabilité : un nouveau message envoyé juste après une réponse compte aussi comme un travail observé de nouveau, et une génération que vous arrêtez vous-même compte comme une preuve perdue pendant un travail. Les compteurs sont de simples nombres, sans contenu de page, adresse, onglet ni heure. Chrome les garde dans la mémoire de session de l'extension : ils ne sont ni écrits sur le disque, ni exportés, ni envoyés, et ils repartent de zéro quand Chrome se ferme ou que l'extension est rechargée. Déconnecter un site efface ses compteurs.

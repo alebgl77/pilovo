@@ -3,6 +3,15 @@ import type { WebProvider } from './web';
 
 export const ACTIVITY_TTL = 15_000;
 export const ACTIVITY_HEARTBEAT = 5_000;
+// Evidence renewal. Chrome throttles page timers in background tabs (the hints above) but not the worker's: while work is
+// witnessed or an item to review is unseen, the worker samples that tab again before its evidence expires. Early in a run
+// the delay follows the time already spent working, so a short run is noticed quickly; it never exceeds
+// ACTIVITY_RENEWAL_MAX, which leaves room for two samples (2 s at most each) inside ACTIVITY_TTL.
+export const ACTIVITY_RENEWAL_MIN = 1_000;
+export const ACTIVITY_RENEWAL_MAX = 10_000;
+export const ACTIVITY_RENEWAL_RATIO = 0.25;
+/** working: milliseconds already spent working; omitted for an unseen item to review, renewed at the slowest pace. */
+export const activityRenewalDelay = (working?: number) => working === undefined ? ACTIVITY_RENEWAL_MAX : Math.min(ACTIVITY_RENEWAL_MAX, Math.max(ACTIVITY_RENEWAL_MIN, Math.floor(working * ACTIVITY_RENEWAL_RATIO)));
 export const monotonicEpoch = () => performance.timeOrigin + performance.now();
 export type WebActivityState = 'unknown' | 'idle' | 'working' | 'attention';
 export type WebAttentionReason = 'response_ready' | 'input_required' | 'error_visible';
@@ -37,8 +46,22 @@ export const activityLabelSchema = z.string().trim().min(1).max(ACTIVITY_LABEL_M
 export const AUTO_ACKNOWLEDGE_SECONDS = [0, 5, 15, 30] as const;
 export type AutoAcknowledgeSeconds = typeof AUTO_ACKNOWLEDGE_SECONDS[number];
 export const autoAcknowledgeSchema = z.literal(AUTO_ACKNOWLEDGE_SECONDS);
+// Observation quality: what the worker observed about its own evidence, counted per service. No page content, tab, time or
+// identifier. announced: a response-ready attention was raised. resumed: work was observed again within
+// ACTIVITY_RESUME_WINDOW of such an announcement, which may then have come too early. dropped: an announcement not yet
+// seen lost its evidence, so it left the list. interrupted: evidence was lost while work was witnessed. unobserved: the tab
+// was then found at rest, so that run ended unobserved and nothing was announced. They are indications, not a reliability
+// measurement: a prompt sent right after an answer also counts as resumed.
+export const ACTIVITY_RESUME_WINDOW = 5_000;
+const qualityCount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+export const activityQualitySchema = z.object({ announced: qualityCount, resumed: qualityCount, dropped: qualityCount, interrupted: qualityCount, unobserved: qualityCount }).strict();
+export type ActivityQuality = z.infer<typeof activityQualitySchema>;
+export const ACTIVITY_QUALITY_KEYS = ['announced', 'resumed', 'dropped', 'interrupted', 'unobserved'] as const satisfies readonly (keyof ActivityQuality)[];
+export const emptyActivityQuality = (): ActivityQuality => ({ announced: 0, resumed: 0, dropped: 0, interrupted: 0, unobserved: 0 });
 export interface WebActivitySnapshot {
   availability: 'available' | 'unavailable'; observations: WebActivityObservation[]; observedAt: number;
+  // Optional for a snapshot built without a worker (preview, fixtures): the panel then shows no counters.
+  quality?: Record<WebProvider, ActivityQuality>;
 }
 // Content messages carry no state or page content. They only ask the worker to sample again.
 export const activityHintSchema = z.object({
