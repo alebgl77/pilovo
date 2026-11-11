@@ -68,7 +68,7 @@ These features exist in the current source but not in the 0.4.0 release; build f
 - **Elapsed durations**, such as *Working for 4 min*: minute precision, never saved, restarted when evidence is lost. [Details](docs/installation.md#elapsed-durations)
 - **Stable session numbers, tab positions and names**: numbers that no longer change when other tabs close, and names of up to 40 characters kept in memory for the tab's lifetime, never stored or exported. [Details](docs/installation.md#session-numbers-positions-and-names)
 - **Badge colors and summary**: the count takes the color of the most urgent reason, `…` marks observed work, and the icon's tooltip gives only counts and fixed words. [Details](docs/installation.md#badge-colors-and-summary)
-- **Background evidence renewal**: Pilovo's service worker reads a tab again by itself while it shows observed work or an item to review you have not seen, so both hold while the tab is in the background, where Chrome slows the page's own timers. [Details](docs/installation.md#background-evidence-renewal)
+- **Background evidence renewal**: Pilovo's service worker reads a tab again by itself while it shows observed work or an item to review you have not seen, so neither depends any more on the page's own timers, which Chrome slows in background tabs. Chrome can still freeze or discard the tab. [Details](docs/installation.md#background-evidence-renewal)
 - **Observation quality counters**: under **Settings** › **Local diagnostics**, counts of Pilovo's own announcements and of the evidence it lost during this Chrome session; counts only, kept in memory, not a reliability rate. [Details](docs/installation.md#observation-quality-counters)
 
 ## Preview compatibility

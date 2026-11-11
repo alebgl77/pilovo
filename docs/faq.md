@@ -132,7 +132,7 @@ No: Pilovo shows observed state, brings the matching tab to the front and record
 
 ### Can Pilovo keep a ChatGPT or Claude tab running in the background?
 
-No: Chrome may slow or discard background tabs, and Pilovo, a Chrome extension that only observes status indicators, does not change that. When evidence lapses, the row shows **Observation interrupted** rather than a guess. In the current source (unreleased; build from source), Pilovo's service worker reads a tab again by itself while it shows observed work or an item to review you have not seen, so those two states hold in the background; it still does not keep the page itself running.
+No: Chrome may slow or discard background tabs, and Pilovo, a Chrome extension that only observes status indicators, does not change that. When evidence lapses, the row shows **Observation interrupted** rather than a guess. In the current source (unreleased; build from source), Pilovo's service worker reads a tab again by itself while it shows observed work or an item to review you have not seen, so those two states no longer depend on the page's own timers in the background; it still does not keep the page itself running, and Chrome can still freeze or discard the tab.
 
 ### Can Pilovo export or back up my ChatGPT or Claude conversations?
 

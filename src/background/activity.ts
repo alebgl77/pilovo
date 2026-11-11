@@ -257,11 +257,15 @@ export class WebActivity {
     // A hint does not identify the target document or provide authoritative state.
     this.schedule(tabId, provider);
   }
-  /** remove: the tab closed or was replaced, so everything bound to it goes, its label included. */
-  invalidateTab(tabId: number, remove = false) {
+  /** remove: the tab closed or was replaced, so everything bound to it goes, its label included. lost: Chrome froze or
+   * discarded the tab, which the user did not ask for: for observation quality its evidence is lost, not navigated away. */
+  invalidateTab(tabId: number, remove = false, lost = false) {
     if (remove) { this.labels.delete(tabId); this.release(tabId); return; }
+    const held = this.records.get(tabId);
+    if (lost && held) this.lapse(tabId, held);
     // Navigation clears the tab's notification, so it also ends the run: the same reason shown again is notified anew.
-    this.reset(tabId); this.repeats.delete(tabId); this.runs.delete(tabId);
+    this.reset(tabId); this.repeats.delete(tabId);
+    if (!lost) this.runs.delete(tabId);
     const record = this.records.get(tabId);
     if (record) {
       this.records.set(tabId, newActivityRecord(record.observation.provider, tabId, record.observation.windowId, '', this.access.now(), this.access.wall()));
@@ -282,7 +286,8 @@ export class WebActivity {
     this.changed();
   }
   updateTab(tabId: number, change: { url?: string; status?: string; discarded?: boolean; frozen?: boolean }, tab?: WebTab) {
-    if (change.url !== undefined || change.status === 'loading' || change.discarded || change.frozen) this.invalidateTab(tabId);
+    const moved = change.url !== undefined || change.status === 'loading';
+    if (moved || change.discarded || change.frozen) this.invalidateTab(tabId, false, !moved);
     if (tab) {
       const provider = WEB_PROVIDERS.find(item => eligibleWebTab(tab, item.id))?.id;
       // Leaving a provider ends that session: its number is released, never carried over to another provider. The label
@@ -334,8 +339,9 @@ export class WebActivity {
       if (!result?.documentId || result.frameId !== 0 || !parsed.success || parsed.data.requestId !== lease.requestId) throw new Error('Invalid sample');
       const identity = [this.workerId, grantId, generation, result.documentId, parsed.data.activationId].join(':');
       let record = this.records.get(tabId);
-      // Evidence that expired before its watchdog ran is lost like any other, and so is a reading with no recognized signal.
-      if (record && (this.access.now() >= record.observation.validUntil || record.identity === identity && parsed.data.evidence === 'unknown')) this.lapse(tabId, record);
+      // Evidence that expired before its watchdog ran is lost like any other, and so are a reading with no recognized signal
+      // and a record replaced by another document or activation. A navigation placeholder holds nothing to lose.
+      if (record && (this.access.now() >= record.observation.validUntil || record.identity !== identity || parsed.data.evidence === 'unknown')) this.lapse(tabId, record);
       if (!record || record.identity !== identity || this.access.now() >= record.observation.validUntil) record = newActivityRecord(provider, tabId, tab.windowId, identity, this.access.now(), this.access.wall());
       record.observation.windowId = tab.windowId;
       const session = this.session(tabId, provider);
@@ -388,8 +394,9 @@ export class WebActivity {
       this.runs.delete(tabId);
     }
   }
-  // Evidence is about to be lost without navigation (expired, an unreadable tab or no recognized signal): an announcement
-  // not yet seen leaves the list, and witnessed work loses its witness. Called before the record is made unknown.
+  // Evidence is about to be lost without navigation (expired, an unreadable tab, no recognized signal, another document or
+  // activation, or a tab that Chrome froze or discarded): an announcement not yet seen leaves the list, and witnessed work
+  // loses its witness. Called before the record is made unknown or replaced.
   private lapse(tabId: number, record: ActivityRecord) {
     const { provider, attention } = record.observation;
     if (attention?.reason === 'response_ready' && !attention.acknowledged) countQuality(this.quality, provider, 'dropped');

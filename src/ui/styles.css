@@ -273,7 +273,7 @@ summary svg { margin-right: 5px; }
 .delete-data { padding-top: 22px; margin-top: 22px; border-top: 1px solid var(--line); }
 .delete-data p { margin-bottom: 14px; }
 .diagnostics { max-width: 610px; }
-.settings-section h3 { font-size: 14px; margin: 24px 0 6px; letter-spacing: -.1px; }
+.settings-section h3 { font-size: 14px; font-weight: 600; margin: 24px 0 6px; letter-spacing: -.1px; }
 .quality > div { grid-template-columns: minmax(0, 1.7fr) minmax(48px, .3fr); }
 .bridge-section { padding: 5px 0 28px; }
 .bridge-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }

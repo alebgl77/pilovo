@@ -194,6 +194,7 @@ describe('leased worker observations', () => {
     expect(vi.mocked(access.unregister).mock.invocationCallOrder.at(-1)!).toBeLessThan(vi.mocked(access.register).mock.invocationCallOrder.at(-1)!);
   });
   it('bounds hints to one sample per second, one job and one coalesced pending request', async () => {
+    renewal.held = true;
     activity.start(); await tick(); expect(access.sample).toHaveBeenCalledTimes(1);
     await Promise.all(Array.from({ length: 100 }, (_, i) => activity.hint(hint(i + 1), sender()))); await tick(999); expect(access.sample).toHaveBeenCalledTimes(1);
     await tick(1); expect(access.sample).toHaveBeenCalledTimes(2);
@@ -211,6 +212,7 @@ describe('leased worker observations', () => {
   it.each([
     { id: 'other' }, { frameId: 1 }, { documentId: '' }, { documentLifecycle: 'cached' }, { url: 'https://chatgpt.com.evil.test/' }, { tab: { ...currentTab(), incognito: true } }, { url: 'https://user@chatgpt.com/' }, { url: 'https://chatgpt.com:444/' },
   ])('ignores unauthorized hint sender %j', async patch => {
+    renewal.held = true;
     activity.start(); await tick(); await activity.hint(hint(), { ...sender(), ...patch }); await tick(1000); expect(access.sample).toHaveBeenCalledTimes(1);
   });
   it('rejects payload authority, extra data, malformed IDs and sample strings before commit', async () => {
@@ -376,6 +378,7 @@ describe('next attention and mark all as seen', () => {
     expect(focused().slice(1).sort()).toEqual([1, 2]); expect(access.focus).toHaveBeenCalledTimes(3);
   });
   it('reports no candidate without sampling or focusing when nothing needs attention', async () => {
+    renewal.held = true;
     activity.start(); await tick();
     const samples = vi.mocked(access.sample).mock.calls.length;
     expect(await activity.focusNextAttention()).toBe('none');
@@ -1165,6 +1168,13 @@ describe('worker-side evidence renewal', () => {
     await tick(); const before = sampled();
     await pass(30_000); expect(sampled()).toBe(before);
   });
+  it('lets a focus that waits for the rate bound keep its sample when a renewal comes due, then renews again', async () => {
+    activity.start(); await tick(); const id = row().id, started = row().stateSince;
+    // The renewal is due a second after the first sample, exactly when focus may take its own fresh sample.
+    await tick(500); const focusing = activity.focus(id); await pass(1_500); await focusing;
+    expect(access.focus).toHaveBeenCalledOnce();
+    await pass(30_000); expect(row()).toMatchObject({ id, state: 'working', stateSince: started });
+  });
   it('gives each renewal its own 15 s lease and leaves the lifetime of the evidence unchanged', async () => {
     activity.start(); await tick(); await pass(30_000);
     for (const [, lease] of vi.mocked(access.sample).mock.calls) expect(lease.expiresAt - lease.issuedAt).toBe(ACTIVITY_TTL);
@@ -1216,12 +1226,45 @@ describe('observation quality counters', () => {
     expect(row().state).toBe('unknown'); expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1, interrupted: 2 });
     await pass(ACTIVITY_TTL + 1_000); expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1, interrupted: 2 });
   });
-  it('does not count navigation, closure or a seen item as a loss, and forgets a service with its grant', async () => {
+  it('does not count navigation or closure as a loss, and forgets a service with its grant', async () => {
     renewal.held = true; activity.start(); await tick();
     activity.invalidateTab(1); await read('idle_ready'); expect(quality()).toEqual(zero);
     await announce(); activity.invalidateTab(1); await read('idle_ready'); expect(quality()).toEqual({ ...zero, announced: 1 });
     await read('working'); activity.invalidateTab(1, true); await tick(); expect(quality()).toEqual({ ...zero, announced: 1 });
     activity.revoke('chatgpt-web'); await tick(); expect(quality()).toEqual(zero);
+  });
+  it('counts a tab that Chrome freezes or discards as lost evidence, unlike a page the user navigates', async () => {
+    activity.start(); await tick();
+    await announce(); activity.updateTab(1, { frozen: true }, { ...currentTab(), frozen: true }); await tick();
+    expect(row()).toMatchObject({ state: 'unknown', unknownReason: 'navigation' }); expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1 });
+    // Working again once resumed, then discarded: the witness is lost, and the tab found at rest afterwards ended unobserved.
+    await read('working'); expect(row().state).toBe('working');
+    activity.updateTab(1, { discarded: true }, { ...currentTab(), discarded: true }); await tick(); expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1, interrupted: 1 });
+    await read('idle_ready'); expect(row().state).toBe('idle'); expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1, interrupted: 1, unobserved: 1 });
+    // A new address or a reload, alone or with a discard, is the user's navigation: no loss.
+    await read('working'); activity.updateTab(1, { url: 'https://chatgpt.com/c/other' }, currentTab()); await read('idle_ready');
+    await read('working'); activity.updateTab(1, { status: 'loading', discarded: true }, { ...currentTab(), status: 'loading' }); await read('idle_ready');
+    expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1, interrupted: 1, unobserved: 1 });
+  });
+  it('counts a record replaced by another activation, with no tab event, as lost evidence', async () => {
+    activity.start(); await tick(); await announce();
+    activationId = crypto.randomUUID(); await read('idle_ready');
+    expect(row().state).toBe('idle'); expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1 });
+    await read('working'); activationId = crypto.randomUUID(); await read('idle_ready');
+    expect(quality()).toEqual({ ...zero, announced: 1, dropped: 1, interrupted: 1, unobserved: 1 });
+    // Work still running in the new activation lost its witness but not its end.
+    await read('working'); activationId = crypto.randomUUID(); await read('working'); await read('idle_ready'); await tick(1000);
+    expect(row().attention?.reason).toBe('response_ready'); expect(quality()).toEqual({ ...zero, announced: 2, dropped: 1, interrupted: 2, unobserved: 1 });
+  });
+  it('restores once when asked twice at the same time, and writes again after a failed write', async () => {
+    const service = (announced: number) => ({ counts: { ...zero, announced }, live: { working: 0, unseen: 0 } });
+    vi.mocked(access.readQuality).mockResolvedValue({ version: 1, services: { 'claude-web': service(0), 'chatgpt-web': service(4) } });
+    await Promise.all([activity.restoreQuality(), activity.restoreQuality()]); expect(quality()).toEqual({ ...zero, announced: 4 });
+    vi.mocked(access.writeQuality).mockClear(); vi.mocked(access.writeQuality).mockRejectedValueOnce(new Error('quota'));
+    activity.start(); await tick(); await announce();
+    // The first write of this run failed: a later change writes the current value, so nothing stays unsaved.
+    expect(vi.mocked(access.writeQuality).mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(vi.mocked(access.writeQuality).mock.lastCall![0].services['chatgpt-web']).toEqual({ counts: { ...zero, announced: 5 }, live: { working: 0, unseen: 1 } });
   });
   it('writes nothing before restoring, then adds what the browser session holds and counts what the last worker life lost', async () => {
     const service = (counts: Partial<typeof zero> = {}, live = { working: 0, unseen: 0 }) => ({ counts: { ...zero, ...counts }, live });

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ACTIVITY_QUALITY_KEYS, activityQualitySchema, emptyActivityQuality, type ActivityQuality } from '../shared/activity';
-import { WEB_PROVIDERS, type WebProvider } from '../shared/web';
+import { WEB_PROVIDERS, webProviderSchema, type WebProvider } from '../shared/web';
 
 // Observation quality counters live in Chrome's session storage area: memory only, never written to disk, cleared when the
 // browser closes or the extension is reloaded or updated. They outlive a worker restart, which worker memory does not.
@@ -9,7 +9,8 @@ import { WEB_PROVIDERS, type WebProvider } from '../shared/web';
 export const QUALITY_KEY = 'pilovo.activityQuality';
 const liveCount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const serviceSchema = z.object({ counts: activityQualitySchema, live: z.object({ working: liveCount, unseen: liveCount }).strict() }).strict();
-export const storedQualitySchema = z.object({ version: z.literal(1), services: z.object({ 'claude-web': serviceSchema, 'chatgpt-web': serviceSchema }).strict() }).strict();
+// One entry per service, no more and no fewer: a record keyed by the service enum is exhaustive.
+export const storedQualitySchema = z.object({ version: z.literal(1), services: z.record(webProviderSchema, serviceSchema) }).strict();
 export type StoredQuality = z.infer<typeof storedQualitySchema>;
 export type QualityByProvider = Record<WebProvider, ActivityQuality>;
 export type LiveQuality = StoredQuality['services'][WebProvider]['live'];
