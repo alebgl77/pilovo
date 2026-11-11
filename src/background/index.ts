@@ -12,6 +12,9 @@ const web = new WebBrowser(chromeWebBrowser);
 let notifyTimer: ReturnType<typeof setTimeout> | undefined;
 const notify = () => { if (notifyTimer) return; notifyTimer = setTimeout(() => { notifyTimer = undefined; void chrome.runtime.sendMessage({ channel: 'hub.changed' }).catch(() => undefined); }, 200); };
 const activity = new WebActivity(chromeActivityAccess((provider, tabId, current) => web.open(provider, tabId, current), notify));
+// The observation quality counters of this browser session, kept in memory by Chrome, are read before anything is
+// observed, whether or not the settings below load: counters never restored are never saved.
+const qualityRestored = activity.restoreQuality();
 const invalidateDiscovery = () => { web.invalidate(); notify(); };
 // The toolbar title and notification text follow the app's language setting, automatic seen its delay and OS notifications
 // their services (both off by default). A reply applies only if no newer call has applied yet, so an older call resolving
@@ -62,6 +65,7 @@ const ready = (async () => {
   await repository.setConnection('claude-code', 'disconnected'); await repository.setConnection('codex', 'disconnected');
   await chrome.alarms.create('hub-maintenance', { periodInMinutes: 1 });
   await chrome.alarms.create('pilovo-activity', { periodInMinutes: 0.5 });
+  await qualityRestored;
   activity.start();
 })();
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond: (response: ApiResult<unknown>) => void) => {
@@ -93,7 +97,7 @@ chrome.permissions.onRemoved.addListener(permission => {
 // A grant that reaches a waking worker starts observing once the stored settings apply, like the activity alarm below.
 chrome.permissions.onAdded.addListener(permission => {
   invalidateDiscovery();
-  for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) void ready.catch(() => undefined).then(() => activity.reconcile(provider.id));
+  for (const provider of WEB_PROVIDERS) if (permission.origins?.includes(provider.pattern)) void ready.catch(() => undefined).then(() => qualityRestored).then(() => activity.reconcile(provider.id));
   if (permission.permissions?.includes(NOTIFICATION_PERMISSION)) { hearNotices(); activity.notificationsGranted(); }
 });
 // Opening, closing, moving, attaching or detaching a tab shifts its neighbors' positions: observed rows re-read theirs.
@@ -113,7 +117,7 @@ chrome.windows.onFocusChanged.addListener(windowId => { activity.viewChanged(win
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'hub-maintenance') void ready.then(async () => { await repository.cleanup(); notify(); }).catch(() => undefined); });
 // An alarm that wakes the worker starts observing only once the stored settings apply, as at startup: attention sampled
 // before them would count as raised before its service was opted into notifications.
-chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'pilovo-activity') { activity.expire(); void ready.catch(() => undefined).then(() => activity.start()); } });
+chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'pilovo-activity') { activity.expire(); void ready.catch(() => undefined).then(() => qualityRestored).then(() => activity.start()); } });
 // Chrome's command gesture does not survive an await: the nothing-to-review case opens the panel synchronously,
 // in the command's window or else the last focused browser window, tracked ahead of time (window IDs only).
 let lastFocusedWindow: number | undefined;

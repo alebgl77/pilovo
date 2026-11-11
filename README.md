@@ -17,7 +17,7 @@ Version 0.4.0 is an experimental preview for Chrome 120 or later, published as a
 
 ## Pilovo at a glance
 
-Facts about the 0.4.0 release. Last reviewed: 11 October 2026.
+Facts about the 0.4.0 release. Last reviewed: 11 November 2026.
 
 | Item | Pilovo 0.4.0 |
 | --- | --- |
@@ -68,6 +68,8 @@ These features exist in the current source but not in the 0.4.0 release; build f
 - **Elapsed durations**, such as *Working for 4 min*: minute precision, never saved, restarted when evidence is lost. [Details](docs/installation.md#elapsed-durations)
 - **Stable session numbers, tab positions and names**: numbers that no longer change when other tabs close, and names of up to 40 characters kept in memory for the tab's lifetime, never stored or exported. [Details](docs/installation.md#session-numbers-positions-and-names)
 - **Badge colors and summary**: the count takes the color of the most urgent reason, `…` marks observed work, and the icon's tooltip gives only counts and fixed words. [Details](docs/installation.md#badge-colors-and-summary)
+- **Background evidence renewal**: Pilovo's service worker reads a tab again by itself while it shows observed work or an item to review you have not seen, so neither depends any more on the page's own timers, which Chrome slows in background tabs. Chrome can still freeze or discard the tab. [Details](docs/installation.md#background-evidence-renewal)
+- **Observation quality counters**: under **Settings** › **Local diagnostics**, counts of Pilovo's own announcements and of the evidence it lost during this Chrome session; counts only, kept in memory, not a reliability rate. [Details](docs/installation.md#observation-quality-counters)
 
 ## Preview compatibility
 
@@ -94,7 +96,7 @@ Provider account rules, plans and quotas still apply. No CLI or Node.js is neede
 | Optional `https://chatgpt.com/*` or `https://claude.ai/*` | Recognize matching tabs, read supported status indicators and focus a tab; requested individually. |
 | Optional `notifications` (unreleased) | System notifications for the services you check in Settings, off by default; requested when you check the first service and removed when you uncheck the last. |
 
-Pilovo never requests the `tabs` permission, access to all sites or `nativeMessaging`. The observer reads a limited set of DOM controls and dedicated status indicators. It does not collect full conversations, prompt or response text, tab titles, screenshots, cookies or credentials. Activity metadata stays local and ephemeral; session names you type (unreleased) stay in that memory for their tab's lifetime and are never stored or exported. Optional automatic seen (unreleased, off by default) reads only which tab is active in the focused window, as IDs and flags kept in memory. Optional system notifications (unreleased, off by default) contain only the service, the reason and the session number; your operating system may keep them in its notification center. No backend, model API, remote telemetry or cloud sync is used. Revocation invalidates access; the observer's lease has a logical cutoff of at most 15 seconds, even if Chrome delays execution of cleanup. See [Privacy](docs/privacy.md) and the [technical contract](docs/core-contract.md).
+Pilovo never requests the `tabs` permission, access to all sites or `nativeMessaging`. The observer reads a limited set of DOM controls and dedicated status indicators. It does not collect full conversations, prompt or response text, tab titles, screenshots, cookies or credentials. Activity metadata stays local and ephemeral; session names you type (unreleased) stay in that memory for their tab's lifetime and are never stored or exported. Optional automatic seen (unreleased, off by default) reads only which tab is active in the focused window, as IDs and flags kept in memory. Optional system notifications (unreleased, off by default) contain only the service, the reason and the session number; your operating system may keep them in its notification center. Observation quality counters (unreleased) are counts only, kept in Chrome's session memory until the browser closes, never written to disk or exported. No backend, model API, remote telemetry or cloud sync is used. Revocation invalidates access; the observer's lease has a logical cutoff of at most 15 seconds, even if Chrome delays execution of cleanup. See [Privacy](docs/privacy.md) and the [technical contract](docs/core-contract.md).
 
 ## Frequently asked questions
 

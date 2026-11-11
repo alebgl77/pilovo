@@ -1,4 +1,4 @@
-import { activityLabelSchema, type WebActivityObservation, type WebActivitySnapshot } from '../shared/activity';
+import { ACTIVITY_QUALITY_KEYS, activityLabelSchema, emptyActivityQuality, type ActivityQuality, type WebActivityObservation, type WebActivitySnapshot } from '../shared/activity';
 import { WEB_PROVIDERS, type WebDiscovery, type WebProvider } from '../shared/web';
 
 /** Downgrade uncertain data before deriving rows, actions or summary counts. Unseen attention follows the worker's next-attention order (raised first, then lower tab ID). */
@@ -73,4 +73,11 @@ export function labelChange(draft: string): string | null | undefined {
   if (!draft.trim()) return null;
   const parsed = activityLabelSchema.safeParse(draft);
   return parsed.success ? parsed.data : undefined;
+}
+/** Observation quality counters added across services, or null when the snapshot carries none (preview, fixtures). */
+export function totalQuality(quality: WebActivitySnapshot['quality']): ActivityQuality | null {
+  if (!quality) return null;
+  const total = emptyActivityQuality();
+  for (const counts of Object.values(quality)) for (const key of ACTIVITY_QUALITY_KEYS) total[key] += counts[key];
+  return total;
 }

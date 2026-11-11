@@ -1,10 +1,11 @@
-import { ACTIVITY_TTL, activityHintSchema, activityLabelSchema, activitySampleSchema, autoAcknowledgeSchema, monotonicEpoch, type ActivityLease, type AutoAcknowledgeSeconds, type WebActivityObservation, type WebActivitySnapshot, type WebAttentionReason } from '../shared/activity';
+import { ACTIVITY_RESUME_WINDOW, ACTIVITY_TTL, activityHintSchema, activityLabelSchema, activityRenewalDelay, activitySampleSchema, autoAcknowledgeSchema, emptyActivityQuality, monotonicEpoch, type ActivityLease, type AutoAcknowledgeSeconds, type WebActivityObservation, type WebActivitySnapshot, type WebAttentionReason } from '../shared/activity';
 import { notifyProvidersSchema, WEB_PROVIDERS, type WebProvider } from '../shared/web';
 import { HubError } from '../shared/errors';
 import { eligibleWebTab, matchesWebProvider, type WebTab } from '../platform/web';
 import { makeUnknown, newActivityRecord, reduceActivity, type ActivityRecord } from './activity-reducer';
 import { disposeInstalledController, sampleInstalledController } from './activity-injection';
 import { activityBadge, activityLanguage, sameBadge, type ActivityBadge, type ActivityLanguage } from './activity-badge';
+import { countQuality, emptyQuality, QUALITY_KEY, restoreQuality, storedQuality, type StoredQuality } from './activity-quality';
 import { activityNotice, isNoticeId, NOTICE_GRACE, NOTICE_LIMIT, NOTICE_RESAMPLE, noticeId, NOTIFIED_LIMIT, NOTIFICATION_PERMISSION, parseNoticeId, remember, type ActivityNotice } from './activity-notifications';
 
 export interface ActivityAccess {
@@ -29,10 +30,13 @@ export interface ActivityAccess {
   shownNotifications(): Promise<string[]>;
   /** Tells open panels that something changed (hub.changed); unrelated to OS notifications. */
   notify(): void;
+  /** Observation quality counters, in Chrome's session storage area: memory only, cleared with the browser session. */
+  readQuality(): Promise<unknown>;
+  writeQuality(quality: StoredQuality): Promise<void>;
   now(): number; wall(): number;
 }
 interface Grant { enabled: boolean; id: string; revision: number; queue: Promise<void> }
-interface Slot { generation: number; operation: number; inFlight: boolean; pending: boolean; lastStarted: number; desiredProvider?: WebProvider; timer?: ReturnType<typeof setTimeout>; settled?: Promise<void>; focusing?: number }
+interface Slot { generation: number; operation: number; inFlight: boolean; pending: boolean; lastStarted: number; desiredProvider?: WebProvider; timer?: ReturnType<typeof setTimeout>; renewal?: ReturnType<typeof setTimeout>; settled?: Promise<void>; focusing?: number }
 interface HintSender { id?: string; frameId?: number; documentId?: string; documentLifecycle?: string; url?: string; tab?: WebTab }
 // Tab-level identity, independent of the document: it survives navigation and record replacement in the same tab, and
 // ends with the tab, its provider grant, the tab leaving that provider, or this worker. Memory only.
@@ -84,6 +88,14 @@ export class WebActivity {
   private graceTimer?: ReturnType<typeof setTimeout>;
   // Checks re-run after every change, each until its condition holds or its deadline passes (see until()).
   private readonly waiters = new Set<() => void>();
+  // Observation quality: per service, counts of what this worker observed about its own evidence, and per tab whether
+  // witnessed work still has its evidence or lost it. The counts are saved to session storage once restoreQuality() has
+  // read what an earlier worker life left; the per-tab state is memory only.
+  private readonly quality = emptyQuality();
+  private readonly runs = new Map<number, 'witnessed' | 'broken'>();
+  private qualityRestored = false;
+  private qualitySaved?: string;
+  private qualityQueue = Promise.resolve();
   // The first paint of each worker life clears a badge and title left by a previous one, and its notifications too.
   constructor(private readonly access: ActivityAccess) { this.paintBadge(); this.clearStaleNotices(); }
 
@@ -164,6 +176,15 @@ export class WebActivity {
     this.viewChanged();
   }
 
+  /** Once per worker life, before observing: adds the counters this browser session already holds. Witnessed work and unseen
+   * announcements that the previous worker life still held were discarded with it, and are counted as lost. */
+  async restoreQuality() {
+    if (this.qualityRestored) return;
+    const stored = await this.access.readQuality().catch(() => undefined);
+    if (this.qualityRestored) return;
+    restoreQuality(this.quality, stored);
+    this.qualityRestored = true; this.saveQuality();
+  }
   start() { for (const provider of WEB_PROVIDERS) this.reconcile(provider.id); }
   // Each provider has one serialized registration queue. Old revoke/unregister operations cannot race a regrant.
   reconcile(provider: WebProvider) {
@@ -203,6 +224,8 @@ export class WebActivity {
     for (const [tabId, record] of this.records) if (record.observation.provider === provider) this.release(tabId);
     for (const [tabId, session] of this.sessions) if (session.provider === provider) this.sessions.delete(tabId);
     for (const [tabId, label] of this.labels) if (label.provider === provider) this.labels.delete(tabId);
+    // Without the grant, nothing about that service is kept, its observation quality counters included.
+    this.quality[provider] = emptyActivityQuality();
     // Jobs not yet represented by a record must also fail the grant identity check.
     this.changed();
   }
@@ -234,11 +257,15 @@ export class WebActivity {
     // A hint does not identify the target document or provide authoritative state.
     this.schedule(tabId, provider);
   }
-  /** remove: the tab closed or was replaced, so everything bound to it goes, its label included. */
-  invalidateTab(tabId: number, remove = false) {
+  /** remove: the tab closed or was replaced, so everything bound to it goes, its label included. lost: Chrome froze or
+   * discarded the tab, which the user did not ask for: for observation quality its evidence is lost, not navigated away. */
+  invalidateTab(tabId: number, remove = false, lost = false) {
     if (remove) { this.labels.delete(tabId); this.release(tabId); return; }
+    const held = this.records.get(tabId);
+    if (lost && held) this.lapse(tabId, held);
     // Navigation clears the tab's notification, so it also ends the run: the same reason shown again is notified anew.
     this.reset(tabId); this.repeats.delete(tabId);
+    if (!lost) this.runs.delete(tabId);
     const record = this.records.get(tabId);
     if (record) {
       this.records.set(tabId, newActivityRecord(record.observation.provider, tabId, record.observation.windowId, '', this.access.now(), this.access.wall()));
@@ -248,18 +275,19 @@ export class WebActivity {
   }
   private reset(tabId: number) {
     const slot = this.slots.get(tabId);
-    if (slot) { slot.generation++; slot.operation++; slot.pending = false; clearTimeout(slot.timer); slot.timer = undefined; }
+    if (slot) { slot.generation++; slot.operation++; slot.pending = false; clearTimeout(slot.timer); slot.timer = undefined; clearTimeout(slot.renewal); slot.renewal = undefined; }
     this.sequences.delete(tabId);
   }
   // The tab is no longer observed for its provider (left it, or its grant ended): its row and number go; a label stays
   // with the open tab unless the caller removes it.
   private release(tabId: number) {
     this.reset(tabId);
-    this.records.delete(tabId); this.slots.delete(tabId); this.sessions.delete(tabId); this.repeats.delete(tabId);
+    this.records.delete(tabId); this.slots.delete(tabId); this.sessions.delete(tabId); this.repeats.delete(tabId); this.runs.delete(tabId);
     this.changed();
   }
   updateTab(tabId: number, change: { url?: string; status?: string; discarded?: boolean; frozen?: boolean }, tab?: WebTab) {
-    if (change.url !== undefined || change.status === 'loading' || change.discarded || change.frozen) this.invalidateTab(tabId);
+    const moved = change.url !== undefined || change.status === 'loading';
+    if (moved || change.discarded || change.frozen) this.invalidateTab(tabId, false, !moved);
     if (tab) {
       const provider = WEB_PROVIDERS.find(item => eligibleWebTab(tab, item.id))?.id;
       // Leaving a provider ends that session: its number is released, never carried over to another provider. The label
@@ -311,23 +339,28 @@ export class WebActivity {
       if (!result?.documentId || result.frameId !== 0 || !parsed.success || parsed.data.requestId !== lease.requestId) throw new Error('Invalid sample');
       const identity = [this.workerId, grantId, generation, result.documentId, parsed.data.activationId].join(':');
       let record = this.records.get(tabId);
+      // Evidence that expired before its watchdog ran is lost like any other, and so are a reading with no recognized signal
+      // and a record replaced by another document or activation. A navigation placeholder holds nothing to lose.
+      if (record && (this.access.now() >= record.observation.validUntil || record.identity !== identity || parsed.data.evidence === 'unknown')) this.lapse(tabId, record);
       if (!record || record.identity !== identity || this.access.now() >= record.observation.validUntil) record = newActivityRecord(provider, tabId, tab.windowId, identity, this.access.now(), this.access.wall());
       record.observation.windowId = tab.windowId;
       const session = this.session(tabId, provider);
       if (validIndex(tab.index)) session.index = tab.index;
-      const before = record.observation.attention?.id;
+      const prior = record.observation.attention && { ...record.observation.attention };
       reduceActivity(record, parsed.data.evidence, this.access.now(), this.access.wall(), lease.expiresAt);
       this.records.set(tabId, record);
       committed = true;
       if (record.idleSince !== undefined) slot.pending = true;
+      this.renew(tabId, provider, slot, record);
+      this.observed(tabId, record, prior);
       this.changed();
       const attention = record.observation.attention;
-      this.attended(tabId, record, attention && attention.id !== before ? attention.reason : undefined);
+      this.attended(tabId, record, attention && attention.id !== prior?.id ? attention.reason : undefined);
     };
     try {
       await Promise.race([work(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Sample timeout')), 2_000); })]);
     } catch {
-      if (current()) { const record = this.records.get(tabId); if (record) makeUnknown(record, 'unavailable', this.access.now()); this.changed(); }
+      if (current()) { const record = this.records.get(tabId); if (record) { this.lapse(tabId, record); makeUnknown(record, 'unavailable', this.access.now()); } this.changed(); }
     } finally {
       clearTimeout(timer);
       // Invalidates late work even when Chrome completes an injection after the timeout.
@@ -337,9 +370,53 @@ export class WebActivity {
     }
     return committed;
   }
+  // Chrome throttles a background page's timers, so its hints become rare exactly when the user has left the tab; the
+  // worker's timers are not throttled. While work is witnessed or an item to review is unseen, the worker samples again
+  // before the evidence expires: the witness of that work and the unseen item no longer depend on the page's hints. An
+  // idle, unknown or already seen tab is not renewed, and each sample still gets its own 15 s lease.
+  private renew(tabId: number, provider: WebProvider, slot: Slot, record: ActivityRecord) {
+    clearTimeout(slot.renewal); slot.renewal = undefined;
+    const { state, attention, stateSince } = record.observation;
+    // The ready debounce already samples again a second later.
+    if (record.idleSince !== undefined || state !== 'working' && !(state === 'attention' && attention && !attention.acknowledged)) return;
+    const delay = activityRenewalDelay(state === 'working' ? this.access.now() - stateSince : undefined);
+    slot.renewal = setTimeout(() => { slot.renewal = undefined; if (this.slots.get(tabId) === slot) this.schedule(tabId, provider); }, delay);
+  }
+  // Observation quality, after each committed sample. A response-ready attention raised is an announcement; work observed
+  // again right after one may mean it came too early. A reading at rest after lost evidence means that run ended unobserved.
+  private observed(tabId: number, record: ActivityRecord, prior?: NonNullable<WebActivityObservation['attention']>) {
+    const { provider, state, attention } = record.observation, run = this.runs.get(tabId);
+    if (attention?.reason === 'response_ready' && attention.id !== prior?.id) countQuality(this.quality, provider, 'announced');
+    if (state === 'working' && prior?.reason === 'response_ready' && this.access.now() - prior.raisedAt < ACTIVITY_RESUME_WINDOW) countQuality(this.quality, provider, 'resumed');
+    if (record.worked) this.runs.set(tabId, 'witnessed');
+    else if (state === 'idle' || state === 'attention') {
+      if (state === 'idle' && run) { if (run === 'witnessed') countQuality(this.quality, provider, 'interrupted'); countQuality(this.quality, provider, 'unobserved'); }
+      this.runs.delete(tabId);
+    }
+  }
+  // Evidence is about to be lost without navigation (expired, an unreadable tab, no recognized signal, another document or
+  // activation, or a tab that Chrome froze or discarded): an announcement not yet seen leaves the list, and witnessed work
+  // loses its witness. Called before the record is made unknown or replaced.
+  private lapse(tabId: number, record: ActivityRecord) {
+    const { provider, attention } = record.observation;
+    if (attention?.reason === 'response_ready' && !attention.acknowledged) countQuality(this.quality, provider, 'dropped');
+    if (this.runs.get(tabId) === 'witnessed') { countQuality(this.quality, provider, 'interrupted'); this.runs.set(tabId, 'broken'); }
+  }
+  // Saved only when it differs from the last value written, with what this worker life still holds (see activity-quality.ts).
+  private saveQuality() {
+    if (!this.qualityRestored) return;
+    const now = this.access.now(), live = (provider: WebProvider) => {
+      const held = [...this.records.values()].filter(record => record.observation.provider === provider && record.observation.validUntil > now);
+      return { working: held.filter(record => record.worked).length, unseen: held.filter(record => record.observation.attention?.reason === 'response_ready' && !record.observation.attention.acknowledged).length };
+    };
+    const stored = storedQuality(this.quality, live), text = JSON.stringify(stored);
+    if (text === this.qualitySaved) return;
+    this.qualitySaved = text;
+    this.qualityQueue = this.qualityQueue.catch(() => undefined).then(() => this.access.writeQuality(stored)).catch(() => { if (this.qualitySaved === text) this.qualitySaved = undefined; });
+  }
   snapshot(): WebActivitySnapshot {
     this.expire();
-    return { availability: this.available ? 'available' : 'unavailable', observations: [...this.records.values()].map(record => this.present(record)), observedAt: this.access.wall() };
+    return { availability: this.available ? 'available' : 'unavailable', observations: [...this.records.values()].map(record => this.present(record)), observedAt: this.access.wall(), quality: structuredClone(this.quality) };
   }
   // A label appears only on its own tab's observation, for the provider it was given on; positions are omitted until
   // Chrome has reported one.
@@ -595,7 +672,7 @@ export class WebActivity {
   }
   expire() {
     let changed = false;
-    for (const record of this.records.values()) if (record.observation.validUntil <= this.access.now() && record.observation.unknownReason !== 'expired' && record.observation.unknownReason !== 'navigation') { makeUnknown(record, 'expired', this.access.now()); changed = true; }
+    for (const [tabId, record] of this.records) if (record.observation.validUntil <= this.access.now() && record.observation.unknownReason !== 'expired' && record.observation.unknownReason !== 'navigation') { this.lapse(tabId, record); makeUnknown(record, 'expired', this.access.now()); changed = true; }
     // Nothing expired yet (the watchdog may run a fraction of a millisecond early): watch the next deadline again.
     if (changed) this.changed(); else this.arm();
   }
@@ -606,7 +683,7 @@ export class WebActivity {
     this.painted = badge;
     this.badgeQueue = this.badgeQueue.catch(() => undefined).then(() => this.access.badge(badge)).catch(() => { if (this.painted === badge) this.painted = undefined; });
   }
-  private changed() { this.paintBadge(); this.access.notify(); this.arm(); this.dwell(); this.syncNotices(); for (const check of [...this.waiters]) check(); }
+  private changed() { this.paintBadge(); this.access.notify(); this.arm(); this.dwell(); this.syncNotices(); this.saveQuality(); for (const check of [...this.waiters]) check(); }
   // The clock is fractional and setTimeout truncates its delay, so the watchdog rounds up past the earliest validUntil.
   private arm() {
     clearTimeout(this.expiry);
@@ -622,6 +699,9 @@ export function chromeActivityAccess(focus: ActivityAccess['focus'], notify: () 
   let shown: Partial<ActivityBadge> = {};
   return {
     runtimeId: chrome.runtime.id, now: monotonicEpoch, wall: Date.now, focus, notify,
+    // The session storage area: memory only, limited to the extension's own pages and worker, gone with the browser session.
+    readQuality: async () => (await chrome.storage.session.get(QUALITY_KEY))[QUALITY_KEY],
+    writeQuality: quality => chrome.storage.session.set({ [QUALITY_KEY]: quality }),
     hasPermission: provider => chrome.permissions.contains({ origins: [providerInfo(provider).pattern] }),
     tabs: provider => chrome.tabs.query({ url: [providerInfo(provider).pattern] }), tab: id => chrome.tabs.get(id),
     // Without the tabs permission: only the window's id and focused flag and the tab's id, window and active flag are read.

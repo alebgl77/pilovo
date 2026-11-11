@@ -4,7 +4,7 @@ English · [Français](installation.fr.md) · [README](../README.md) · [FAQ](fa
 
 Pilovo 0.4.0 is a Chrome extension installed manually: download `Pilovo_Chrome_v0.4.0.zip` from the [v0.4.0 prerelease](https://github.com/alebgl77/pilovo/releases/tag/v0.4.0), extract it, open `chrome://extensions`, turn on **Developer mode**, then choose **Load unpacked** and select the folder that contains `manifest.json`. It needs Chrome 120 or later. There is no Chrome Web Store listing or approval and no automatic update. You use your own ChatGPT or Claude web account; Pilovo's core is free under MIT and needs no account, API key or companion.
 
-Last reviewed: 11 October 2026.
+Last reviewed: 11 November 2026.
 
 ## Release ZIP
 
@@ -90,6 +90,20 @@ Each row keeps a stable number per service, for example **Claude · session 3**.
 This feature is unreleased: it is available when you build from source, not in the 0.4.0 archive.
 
 The count takes the color of the most urgent reason, red for a visible error, amber-brown for an input request, olive for a response available. With nothing to review but work observed, it shows `…` on gray instead of a count; seen items, waiting and unknown sessions never light it. Hovering Pilovo's icon gives the same summary in text, in the language chosen in Pilovo's settings, for example *Pilovo — 3 to review, including 1 visible error · 1 working*. The badge and its tooltip contain only counts and these fixed words, never a title, URL or conversation content.
+
+### Background evidence renewal
+
+This feature is unreleased: it is available when you build from source, not in the 0.4.0 archive.
+
+Pilovo's page observer asks for a new reading when the page changes and on a 5-second timer, and a reading is valid for 15 seconds. Chrome slows the timers of background tabs, down to about one wake-up per minute. Without renewal, the state of a background tab can therefore lapse between readings: observed work loses its witness, so its end is not announced, and an item to review that you have not seen yet can leave the list. In the current source, the extension's service worker, whose timers Chrome does not slow with tab visibility, reads the tab again by itself while it shows observed work or an item to review that you have not marked as seen: about every second at the start of a run, then less often, but at least every 10 seconds. It reads the same status indicators as any other reading, with the same checks, and each reading still expires after 15 seconds. Tabs at rest, unknown tabs and items already seen are not renewed. Chrome can still freeze or discard a tab or stop the service worker, and a reading can fail: the state then becomes **Observation interrupted** as before, an item to review lost this way does not come back, and no real-time guarantee is made. While such a tab exists, the service worker stays active.
+
+Measured on 11 November 2026 with Chrome for Testing 153, a synthetic page in a hidden tab and the panel closed: without renewal, a **Response available** item left the toolbar badge 15 to 41 seconds after it was raised; with renewal, it stayed for the 150 seconds observed. This is one synthetic measurement, not a test on a provider session and not a reliability rate.
+
+### Observation quality counters
+
+This feature is unreleased: it is available when you build from source, not in the 0.4.0 archive.
+
+**Settings** › **Local diagnostics** › **Tab observation** shows five counts for the current Chrome session, all services together: responses announced; work observed again within 5 seconds of an announcement; announcements lost before being seen; evidence lost during work; ends of work not observed. They let you see, on your own machine, how observation behaves, for example whether items to review are lost while their tabs are in the background. They are indications, not a reliability rate: a new message sent right after an answer also counts as work observed again, and a generation you stop by hand counts as evidence lost during work. A tab that Chrome freezes or discards counts as lost evidence; a page you navigate or close does not. The counters are numbers only, with no page content, address, tab or time. Chrome keeps them in the extension's session memory: they are not written to disk, exported or sent, and they restart from zero when Chrome closes or the extension is reloaded. Disconnecting a site clears its counts.
 
 ## Installation simple en français
 

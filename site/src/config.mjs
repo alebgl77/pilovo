@@ -10,7 +10,7 @@ export const RELEASE = Object.freeze({
   zip: 'Pilovo_Chrome_v0.4.0.zip',
   sums: 'Pilovo_SHA256_v0.4.0.json',
 });
-export const REVIEWED = '2026-10-11';
+export const REVIEWED = '2026-11-11';
 export const MONTHS = Object.freeze({
   en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
   fr: ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'],

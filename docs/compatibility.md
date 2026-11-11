@@ -2,7 +2,7 @@
 
 French summary: [FAQ, Compatibilité](faq.fr.md#compatibilité).
 
-Evidence dated 10 October 2026; table last reviewed 11 October 2026. This pilot observes a bounded set of web UI controls. Provider changes, account variants, locale and page throttling can produce unknown states. There is no measured coverage percentage or universal agent support.
+Evidence dated 10 October 2026; table last reviewed 11 November 2026. This pilot observes a bounded set of web UI controls. Provider changes, account variants, locale and page throttling can produce unknown states. There is no measured coverage percentage or universal agent support.
 
 | Surface / capability | Preview status | Evidence and limits |
 | --- | --- | --- |
@@ -25,6 +25,8 @@ Evidence dated 10 October 2026; table last reviewed 11 October 2026. This pilot 
 | Browsers other than Chrome 120+ | Not supported (Firefox, Safari); not tested (other Chromium-based browsers) | Chrome 120 or later is the only documented requirement (`minimum_chrome_version` 120). |
 | Sound alerts | Not supported | Pilovo plays no sound. With the unreleased OS notifications, the operating system decides whether a notification makes a sound. |
 | Keeping background tabs active | Not supported | Pilovo does not change how Chrome throttles or discards tabs; lapsed evidence becomes unknown. |
+| Worker-side evidence renewal | Unreleased | While a tab shows observed work or an unseen item to review, the service worker samples it again by itself (every 1 to 10 seconds), so those states do not depend on page timers that Chrome throttles in background tabs. Measured on 11 November 2026 with Chrome for Testing 153, a synthetic page in a hidden tab and the panel closed: a 5-second page timer fell to one wake-up per minute after about a minute; without renewal a response-ready item left the badge 15 to 41 seconds after being raised, with renewal it stayed for the 150 seconds observed. One synthetic measurement, not a provider session or a reliability rate. Frozen or discarded tabs and a stopped worker still lose evidence. |
+| Observation quality counters | Unreleased | Local counts, per service, of announcements, work observed again within 5 seconds, announcements lost before being seen, evidence lost during work and ends not observed, shown under Settings › Local diagnostics. Numbers only, in Chrome's session memory; indications for diagnosis, not a measured reliability rate. |
 | Stop / pause / resume / launch | Not supported | No such control commands are exposed by this preview; keyboard commands only focus, open the side panel or acknowledge, and a notification click only focuses. |
 
 ## Manual selector evidence
